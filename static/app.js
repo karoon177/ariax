@@ -7,7 +7,7 @@ const S = {
   token: localStorage.getItem('ax_token') || null,
   uid: null, cfg: {}, tickers: {},
   symbol: localStorage.getItem('ax_sym') || 'BTC/USDT',
-  kind: 'spot', side: 'buy', otype: 'limit', interval: '1m',
+  kind: 'spot', side: 'buy', otype: 'limit', interval: localStorage.getItem('ax_interval') || '1m',
   candles: [], book: null, trades: [],
   orders: [], positions: [], fills: [], wallet: null,
   botActive: false,
@@ -390,8 +390,9 @@ async function submitOrder() {
 /* ---------------- user data ---------------- */
 async function refreshUser() {
   if (!S.token) return;
-  const [o, p, w, f] = await Promise.all([api('/api/orders'), api('/api/positions'), api('/api/wallet'), api('/api/fills')]);
-  if (f.ok) { fillsCache = f.data; renderHistory(); }
+  const [o, p, w, f, perf] = await Promise.all([api('/api/orders'), api('/api/positions'), api('/api/wallet'), api('/api/fills'), api('/api/performance')]);
+  if (f.ok) { fillsCache = f.data; renderFills(); }
+  if (perf.ok) { S.performance = perf; renderPerformance(); }
   if (o.ok) S.orders = o.data;
   if (p.ok) S.positions = p.data;
   if (w.ok) S.wallet = w;
@@ -411,9 +412,14 @@ function onUserEvent(d) {
   else if (d.type === 'bot') toast('🤖 ' + d.msg, 'warn');
   else if (d.type === 'pnl') toast(`PnL realise شد: ${fmt(d.pnl, 2)} USDT`, d.pnl >= 0 ? 'ok' : 'warn');
 }
+function renderPerformance() {
+  const p = S.performance; const el = $('#performance-summary'); if (!el || !p) return;
+  const cls = p.net_pnl >= 0 ? 'g' : 'r';
+  el.innerHTML = `<div><span>سود/زیان تحقق‌یافته</span><b class="${p.realized_pnl >= 0 ? 'g':'r'}">${fmt(p.realized_pnl, 4)} USDT</b></div><div><span>کارمزد کل</span><b>${fmt(p.fees, 4)} USDT</b></div><div><span>تعداد اجرا</span><b>${p.trades}</b></div><div><span>سود خالص</span><b class="${cls}">${fmt(p.net_pnl, 4)} USDT</b></div>`;
+}
 function renderFills() {
   $('#tbl-history tbody').innerHTML = fillsCache.map(f =>
-    `<tr><td class="num">${tfmt(Date.now() / 1000)}</td><td>${f.symbol}</td><td class="${f.side === 'buy' ? 'g' : 'r'}">${f.side === 'buy' ? 'خرید' : 'فروش'}</td><td class="num">${pfmt(f.symbol, f.price)}</td><td class="num">${fmt(f.qty, 6)}</td><td class="num">${fmt(f.fee, 6)}</td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--mut)">معامله‌ای در این نشست ثبت نشده</td></tr>';
+    `<tr><td class="num">${tfmt(f.ts || Date.now() / 1000)}</td><td>${f.symbol}</td><td class="${f.side === 'buy' ? 'g' : 'r'}">${f.side === 'buy' ? 'خرید' : 'فروش'}</td><td class="num">${pfmt(f.symbol, f.price)}</td><td class="num">${fmt(f.qty, 6)}</td><td class="num">${fmt(f.fee, 6)}</td></tr>`).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--mut)">هنوز معامله‌ای ثبت نشده است</td></tr>';
 }
 
 /* ---------------- AI dashboard ---------------- */
@@ -514,8 +520,9 @@ async function init() {
     $('#of-price').disabled = S.otype === 'market';
     if (S.otype === 'market' && S.tickers[S.symbol]) $('#of-price').value = S.tickers[S.symbol].last;
   });
+  $$('.iv-btns button').forEach(b => b.classList.toggle('active', b.dataset.iv === S.interval));
   $$('.iv-btns button').forEach(b => b.onclick = async () => {
-    S.interval = b.dataset.iv;
+    S.interval = b.dataset.iv; localStorage.setItem('ax_interval', S.interval);
     $$('.iv-btns button').forEach(x => x.classList.toggle('active', x === b));
     const c = await api(`/api/candles?symbol=${encodeURIComponent(S.symbol)}&interval=${S.interval}`);
     if (c.ok) { S.candles = c.data; chart.setData(S.candles); }
