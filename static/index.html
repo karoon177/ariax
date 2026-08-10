@@ -21,6 +21,7 @@
   <div class="head-left">
     <span class="conn" id="conn-dot" title="اتصال">●</span>
     <button class="btn small ghost" id="btn-faucet">💧 سرمایه تستی</button>
+    <button class="btn small ghost" id="btn-api">🔑 API ربات</button>
     <button class="btn small primary" id="btn-auth">ورود / ثبت‌نام</button>
     <div id="user-chip" class="chip hidden"></div>
   </div>
@@ -98,7 +99,7 @@
           </div>
           <div class="bp-body">
             <table id="tbl-orders"><thead><tr><th>نماد</th><th>جهت</th><th>نوع</th><th>قیمت</th><th>مقدار</th><th>باقی‌مانده</th><th></th></tr></thead><tbody></tbody></table>
-            <table id="tbl-positions" class="hidden"><thead><tr><th>نماد</th><th>جهت</th><th>اندازه</th><th>ورود</th><th>مارک</th><th>اهرم</th><th>مارجین</th><th>PnL</th><th>لیکوئید</th></tr></thead><tbody></tbody></table>
+            <table id="tbl-positions" class="hidden"><thead><tr><th>نماد</th><th>جهت</th><th>اندازه</th><th>ورود</th><th>مارک</th><th>اهرم</th><th>مارجین</th><th>PnL</th><th>لیکوئید</th><th>عملیات</th></tr></thead><tbody></tbody></table>
             <table id="tbl-history" class="hidden"><thead><tr><th>زمان</th><th>نماد</th><th>جهت</th><th>قیمت</th><th>مقدار</th><th>کارمزد</th></tr></thead><tbody></tbody></table>
             <table id="tbl-assets" class="hidden"><thead><tr><th>دارایی</th><th>موجودی</th><th>در سفارش</th><th>ارزش (USDT)</th></tr></thead><tbody></tbody></table>
           </div>
@@ -121,7 +122,7 @@
   <!-- ============ بازارها ============ -->
   <section id="view-markets" class="view hidden">
     <div class="panel">
-      <h2>بازارهای آریا‌اکس <small>قیمت‌ها توسط ایجنت اوراکل شبیه‌سازی می‌شوند</small></h2>
+      <h2>بازارهای آریا‌اکس <small>قیمت‌های مرجع زنده: Kraken Spot و Kraken Futures</small></h2>
       <table id="tbl-markets" class="mk-table">
         <thead><tr><th>نماد</th><th>نوع</th><th>آخرین قیمت</th><th>تغییر ۲۴س</th><th>بیشترین</th><th>کمترین</th><th>حجم ۲۴س</th><th></th></tr></thead>
         <tbody></tbody>
@@ -192,6 +193,13 @@
     <div id="tx-addr-wrap"><label>آدرس (شبیه‌سازی)</label><input id="tx-addr" placeholder="آدرس کیف پول مقصد"></div>
     <button class="btn primary big full" id="tx-submit">تأیید</button>
     <p class="m-note" id="tx-note"></p>
+  </div>
+  <div class="modal hidden" id="modal-api">
+    <button class="m-close">✕</button><h3>🔑 API ربات خارجی</h3>
+    <label>نام کلید</label><input id="api-label" placeholder="My trading bot">
+    <button class="btn primary big full" id="api-create">ساخت کلید جدید</button>
+    <div id="api-result" class="m-note"></div>
+    <p class="m-note">فقط Testnet. کلید Secret را فقط یک بار می‌بینید؛ در ربات با هدرهای X-API-Key و X-API-Secret استفاده کنید.</p>
   </div>
   <div class="modal hidden" id="modal-bot">
     <button class="m-close">✕</button>

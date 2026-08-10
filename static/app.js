@@ -269,6 +269,15 @@ function renderOrders() {
   $('#tbl-orders tbody').innerHTML = S.orders.map(o =>
     `<tr><td>${o.symbol}</td><td class="${o.side === 'buy' ? 'g' : 'r'}">${o.side === 'buy' ? 'خرید' : 'فروش'}</td><td>${o.type === 'limit' ? 'لیمیت' : 'مارکت'}</td><td class="num">${pfmt(o.symbol, o.price)}</td><td class="num">${fmt(o.qty, 6)}</td><td class="num">${fmt(o.rem, 6)}</td><td><button class="mini-x" onclick="cancelOrder(${o.id})">✕</button></td></tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--mut)">سفارش بازی ندارید</td></tr>';
 }
+
+window.closePosition = async (symbol, size, lev) => {
+  if (!confirm(`پوزیشن ${symbol} به‌طور کامل با سفارش مارکت بسته شود؟`)) return;
+  const t = S.tickers[symbol];
+  const r = await api('/api/order', { symbol, side: size > 0 ? 'sell' : 'buy', type: 'market', price: t ? t.last : 0, qty: Math.abs(size), lev });
+  if (r.ok) { toast('درخواست بستن پوزیشن ثبت شد', 'ok'); setTimeout(loadUser, 500); }
+  else toast(r.error || 'بستن پوزیشن ناموفق بود', 'err');
+};
+
 window.cancelOrder = async id => {
   const r = await api('/api/cancel', { id });
   if (!r.ok) toast(r.error || 'خطا', 'err');
@@ -281,8 +290,8 @@ function renderPositions() {
     const upnl = (t.last - p.entry) * p.size;
     const notional = Math.abs(p.size) * t.last;
     const roe = p.margin ? upnl / p.margin * 100 : 0;
-    return `<tr><td>${p.symbol}</td><td class="${p.size > 0 ? 'g' : 'r'}">${p.size > 0 ? 'لانگ' : 'شورت'}</td><td class="num">${fmt(Math.abs(p.size), 6)}</td><td class="num">${pfmt(p.symbol, p.entry)}</td><td class="num">${pfmt(p.symbol, t.last)}</td><td>${p.lev}x</td><td class="num">${fmt(p.margin, 2)}</td><td class="num ${upnl >= 0 ? 'g' : 'r'}">${fmt(upnl, 2)} (${fmt(roe, 1)}%)</td><td class="num">${pfmt(p.symbol, p.liq)}</td></tr>`;
-  }).join('') || '<tr><td colspan="9" style="text-align:center;color:var(--mut)">پوزیشن بازی ندارید</td></tr>';
+    return `<tr><td>${p.symbol}</td><td class="${p.size > 0 ? 'g' : 'r'}">${p.size > 0 ? 'لانگ' : 'شورت'}</td><td class="num">${fmt(Math.abs(p.size), 6)}</td><td class="num">${pfmt(p.symbol, p.entry)}</td><td class="num">${pfmt(p.symbol, t.last)}</td><td>${p.lev}x</td><td class="num">${fmt(p.margin, 2)}</td><td class="num ${upnl >= 0 ? 'g' : 'r'}">${fmt(upnl, 2)} (${fmt(roe, 1)}%)</td><td class="num">${pfmt(p.symbol, p.liq)}</td><td><button class="mini danger-ghost" onclick="closePosition('${p.symbol}',${p.size},${p.lev})">بستن</button></td></tr>`;
+  }).join('') || '<tr><td colspan="10" style="text-align:center;color:var(--mut)">پوزیشن بازی ندارید</td></tr>';
 }
 
 function renderAssets() {
@@ -381,7 +390,8 @@ async function submitOrder() {
 /* ---------------- user data ---------------- */
 async function refreshUser() {
   if (!S.token) return;
-  const [o, p, w] = await Promise.all([api('/api/orders'), api('/api/positions'), api('/api/wallet')]);
+  const [o, p, w, f] = await Promise.all([api('/api/orders'), api('/api/positions'), api('/api/wallet'), api('/api/fills')]);
+  if (f.ok) { fillsCache = f.data; renderHistory(); }
   if (o.ok) S.orders = o.data;
   if (p.ok) S.positions = p.data;
   if (w.ok) S.wallet = w;
@@ -536,6 +546,12 @@ async function init() {
   $('#of-submit').onclick = submitOrder;
   // auth
   $('#btn-auth').onclick = () => openModal('auth');
+  $('#btn-api').onclick = () => { if (!S.token) return openModal('auth'); openModal('api'); };
+  $('#api-create').onclick = async () => {
+    const r = await api('/api/api-keys/create', {label: $('#api-label').value || 'Trading bot'});
+    if (!r.ok) return toast(r.error || 'ساخت کلید ناموفق بود', 'err');
+    $('#api-result').innerHTML = `<b>API Key:</b><code>${r.key}</code><br><b>Secret:</b><code>${r.secret}</code><br>اکنون در جای امن ذخیره کنید؛ Secret دوباره نمایش داده نمی‌شود.`;
+  };
   $('#tab-login').onclick = () => { $('#tab-login').classList.add('active'); $('#tab-register').classList.remove('active'); $('#name-field').classList.add('hidden'); $('#auth-submit').textContent = 'ورود'; };
   $('#tab-register').onclick = () => { $('#tab-register').classList.add('active'); $('#tab-login').classList.remove('active'); $('#name-field').classList.remove('hidden'); $('#auth-submit').textContent = 'ثبت‌نام'; };
   $('#auth-submit').onclick = async () => {
