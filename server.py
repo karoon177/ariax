@@ -5,7 +5,7 @@
 صرافی آزمایشی ارز دیجیتال — اداره‌شده توسط تیم ایجنت‌های هوش مصنوعی
 بک‌اند: سرور HTTP + WebSocket با کتابخانه استاندارد پایتون (بدون وابستگی خارجی)
 """
-import json, os, time, math, random, threading, hashlib, secrets, sqlite3, struct, base64
+import json, os, time, math, random, threading, hashlib, secrets, sqlite3, struct, base64, hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from urllib.request import urlopen
@@ -143,6 +143,9 @@ def init_db():
     with _db_lock, db() as c:
         c.execute('CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, name TEXT, pass TEXT, salt TEXT, created REAL)')
         c.execute('CREATE TABLE IF NOT EXISTS balances(uid INTEGER, asset TEXT, amount REAL, PRIMARY KEY(uid, asset))')
+        c.execute('CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, uid INTEGER, expires REAL)')
+        c.execute('CREATE TABLE IF NOT EXISTS fills(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, symbol TEXT, side TEXT, price REAL, qty REAL, fee REAL, ts REAL)')
+        c.execute('CREATE TABLE IF NOT EXISTS api_keys(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, key_hash TEXT, secret_hash TEXT, label TEXT, created REAL, revoked INTEGER DEFAULT 0)')
         c.execute('CREATE TABLE IF NOT EXISTS ledger(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, type TEXT, asset TEXT, amount REAL, note TEXT, ts REAL)')
 
 def hash_pw(pw, salt):
@@ -158,6 +161,15 @@ def create_user(email, name, pw):
         c.execute('INSERT INTO ledger(uid,type,asset,amount,note,ts) VALUES(?,?,?,?,?,?)',
                   (uid, 'bonus', 'USDT', 20000.0, 'پاداش ثبت‌نام در تست‌نت', time.time()))
     return uid
+
+def new_session(uid):
+    token = secrets.token_hex(24)
+    with _db_lock, db() as c:
+        c.execute('INSERT INTO sessions(token,uid,expires) VALUES(?,?,?)', (token,uid,time.time()+30*86400))
+    SESSIONS[token] = uid
+    return token
+
+def api_key_hash(v): return hashlib.sha256(v.encode()).hexdigest()
 
 def auth_user(email, pw):
     with _db_lock, db() as c:
@@ -281,6 +293,10 @@ def notify_fill(m, taker, maker, px, q):
     STATS['fills'] += 1
     HUB.publish(f"trades:{m.sym}", [t])
 
+def persist_fill(uid, symbol, side, px, qty, fee):
+    with _db_lock, db() as c:
+        c.execute('INSERT INTO fills(uid,symbol,side,price,qty,fee,ts) VALUES(?,?,?,?,?,?,?)', (uid,symbol,side,px,qty,fee,time.time()))
+
 def settle_spot_fill(uid, m, side, px, q, fee_rate):
     bal = BAL[uid]; base = m.cfg['base']
     cost, fee = px * q, px * q * fee_rate
@@ -291,6 +307,7 @@ def settle_spot_fill(uid, m, side, px, q, fee_rate):
         bal[base] = bal.get(base, 0) - q
         bal['USDT'] = bal.get('USDT', 0) + cost - fee
     save_bal(uid)
+    persist_fill(uid, m.sym, side, px, q, fee)
     user_event(uid, dict(type='fill', symbol=m.sym, side=side, price=px, qty=q, fee=round(fee, 6)))
     user_event(uid, dict(type='wallet'))
 
@@ -310,6 +327,7 @@ def perp_fill(uid, m, side, px, q, fee_rate, lev=10):
         pos['size'] += -closeq if pos['size'] > 0 else closeq
         pos['margin'] -= released
         bal['USDT'] += pnl + released
+        ledger(uid, 'realized_pnl', 'USDT', pnl, f'سود/زیان تحقق‌یافته {m.sym}')
         rem += closeq if signed > 0 else -closeq
         user_event(uid, dict(type='pnl', symbol=m.sym, pnl=round(pnl, 4)))
         if abs(pos['size']) < 1e-12:
@@ -324,6 +342,7 @@ def perp_fill(uid, m, side, px, q, fee_rate, lev=10):
         pos['lev'] = lev
         pos['margin'] += px * abs(rem) / lev
     save_bal(uid)
+    persist_fill(uid, m.sym, side, px, q, fee)
     user_event(uid, dict(type='fill', symbol=m.sym, side=side, price=px, qty=q, fee=round(fee, 6)))
     user_event(uid, dict(type='wallet'))
     user_event(uid, dict(type='position', symbol=m.sym))
@@ -846,7 +865,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def _auth_uid(self):
         tok = self.headers.get('Authorization', '').replace('Bearer ', '') or parse_qs(urlparse(self.path).query).get('token', [''])[0]
-        return SESSIONS.get(tok), tok
+        uid = SESSIONS.get(tok)
+        if not uid and tok:
+            with _db_lock, db() as c:
+                r = c.execute('SELECT uid FROM sessions WHERE token=? AND expires>?', (tok,time.time())).fetchone()
+            uid = r[0] if r else None
+            if uid: SESSIONS[tok] = uid
+        # Testnet external API: API key and secret headers; do not use for real funds.
+        key, secret = self.headers.get('X-API-Key',''), self.headers.get('X-API-Secret','')
+        if not uid and key and secret:
+            with _db_lock, db() as c:
+                r = c.execute('SELECT uid FROM api_keys WHERE key_hash=? AND secret_hash=? AND revoked=0', (api_key_hash(key),api_key_hash(secret))).fetchone()
+            uid = r[0] if r else None
+        return uid, tok
 
     def _static(self, path):
         name = STATIC.get(path, path.lstrip('/'))
@@ -923,6 +954,22 @@ class Handler(BaseHTTPRequestHandler):
                 rows = [dict(type=r[0], asset=r[1], amount=r[2], note=r[3], ts=r[4])
                         for r in c.execute('SELECT type,asset,amount,note,ts FROM ledger WHERE uid=? ORDER BY id DESC LIMIT 60', (uid,))]
             return self._json(dict(ok=True, data=rows))
+        if p == '/api/fills':
+            if not uid: return self._json(dict(ok=False, error='auth'), 401)
+            with _db_lock, db() as c:
+                rows = [dict(id=r[0],symbol=r[1],side=r[2],price=r[3],qty=r[4],fee=r[5],ts=r[6]) for r in c.execute('SELECT id,symbol,side,price,qty,fee,ts FROM fills WHERE uid=? ORDER BY id DESC LIMIT 100',(uid,))]
+            return self._json(dict(ok=True,data=rows))
+        if p == '/api/performance':
+            if not uid: return self._json(dict(ok=False, error='auth'), 401)
+            with _db_lock, db() as c:
+                fees = c.execute('SELECT COALESCE(SUM(fee),0),COUNT(*) FROM fills WHERE uid=?',(uid,)).fetchone()
+                pnl = c.execute("SELECT COALESCE(SUM(amount),0) FROM ledger WHERE uid=? AND type='realized_pnl'",(uid,)).fetchone()[0]
+            return self._json(dict(ok=True, realized_pnl=round(pnl,6), fees=round(fees[0],6), trades=fees[1], net_pnl=round(pnl-fees[0],6)))
+        if p == '/api/api-keys':
+            if not uid: return self._json(dict(ok=False,error='auth'),401)
+            with _db_lock, db() as c:
+                rows=[dict(id=r[0],label=r[1],created=r[2],revoked=bool(r[3])) for r in c.execute('SELECT id,label,created,revoked FROM api_keys WHERE uid=? ORDER BY id DESC',(uid,))]
+            return self._json(dict(ok=True,data=rows, auth='X-API-Key + X-API-Secret (testnet)'))
         if p == '/api/orders':
             if not uid: return self._json(dict(ok=False, error='auth'), 401)
             rows = [order_json(o) for o in OPEN_ORDERS.values() if o['uid'] == uid]
@@ -958,8 +1005,7 @@ class Handler(BaseHTTPRequestHandler):
                 nuid = create_user(email, name or email.split('@')[0], pw)
             except sqlite3.IntegrityError:
                 return self._json(dict(ok=False, error='این ایمیل قبلاً ثبت شده است'))
-            token = secrets.token_hex(24)
-            SESSIONS[token] = nuid
+            token = new_session(nuid)
             load_bal(nuid)
             STATS['users'] += 1
             agent_log('support', f'کاربر جدید #{nuid} ثبت‌نام کرد — پاداش ۲۰,۰۰۰ USDT واریز شد')
@@ -967,12 +1013,12 @@ class Handler(BaseHTTPRequestHandler):
         if p == '/api/auth/login':
             nuid = auth_user(b.get('email') or '', b.get('password') or '')
             if not nuid: return self._json(dict(ok=False, error='ایمیل یا رمز عبور اشتباه است'))
-            token = secrets.token_hex(24)
-            SESSIONS[token] = nuid
+            token = new_session(nuid)
             load_bal(nuid)
             return self._json(dict(ok=True, token=token, uid=nuid))
         if p == '/api/auth/logout':
             SESSIONS.pop(tok, None)
+            with _db_lock, db() as c: c.execute('DELETE FROM sessions WHERE token=?', (tok,))
             return self._json(dict(ok=True))
         if not uid:
             return self._json(dict(ok=False, error='ابتدا وارد شوید'), 401)
@@ -1023,6 +1069,14 @@ class Handler(BaseHTTPRequestHandler):
             ledger(uid, 'withdraw', asset, -amt, f'برداشت به {addr[:12]}…')
             user_event(uid, dict(type='wallet'))
             return self._json(dict(ok=True, txid=secrets.token_hex(32)))
+        if p == '/api/api-keys/create':
+            label=(b.get('label') or 'Trading bot')[:40]
+            key='arx_'+secrets.token_urlsafe(18); secret=secrets.token_urlsafe(32)
+            with _db_lock, db() as c: c.execute('INSERT INTO api_keys(uid,key_hash,secret_hash,label,created) VALUES(?,?,?,?,?)',(uid,api_key_hash(key),api_key_hash(secret),label,time.time()))
+            return self._json(dict(ok=True,key=key,secret=secret,warning='Secret فقط همین بار نمایش داده می‌شود؛ فقط Testnet'))
+        if p == '/api/api-keys/revoke':
+            with _db_lock, db() as c: c.execute('UPDATE api_keys SET revoked=1 WHERE id=? AND uid=?',(int(b.get('id',0)),uid))
+            return self._json(dict(ok=True))
         if p == '/api/ai/toggle':
             aid = b.get('id')
             if aid in AGENTS:
