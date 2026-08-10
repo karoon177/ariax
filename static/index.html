@@ -199,7 +199,39 @@
     <label>نام کلید</label><input id="api-label" placeholder="My trading bot">
     <button class="btn primary big full" id="api-create">ساخت کلید جدید</button>
     <div id="api-result" class="m-note"></div>
-    <p class="m-note">فقط Testnet. کلید Secret را فقط یک بار می‌بینید؛ در ربات با هدرهای X-API-Key و X-API-Secret استفاده کنید.</p>
+    <section class="api-guide" dir="rtl">
+      <h4>راهنمای سازندگان ربات</h4>
+      <p><b>Base URL:</b> <code>https://ariax-1.onrender.com</code></p>
+      <p>این API فقط برای <b>AriaX Testnet</b> است. ابتدا کلید و Secret را بسازید و آن‌ها را در متغیر محیطی ربات نگه دارید؛ Secret را در کد، GitHub یا تصویر منتشر نکنید.</p>
+      <h5>احراز هویت</h5>
+      <p>در تمام درخواست‌های خصوصی این دو Header را ارسال کنید:</p>
+      <pre>X-API-Key: ARX_KEY
+X-API-Secret: ARX_SECRET
+Content-Type: application/json</pre>
+      <h5>دریافت داده</h5>
+      <ul><li><code>GET /api/markets</code> — قیمت‌های لحظه‌ای و وضعیت منبع</li><li><code>GET /api/wallet</code> — موجودی و مارجین آزاد</li><li><code>GET /api/orders</code> — سفارش‌های باز</li><li><code>GET /api/positions</code> — پوزیشن‌ها، PnL و قیمت لیکوئید</li><li><code>GET /api/fills</code> — تاریخچهٔ اجرای معاملات و کارمزد</li><li><code>GET /api/performance</code> — سود/زیان تحقق‌یافته، کارمزد و سود خالص</li></ul>
+      <h5>ارسال سفارش</h5>
+      <pre>POST /api/order
+{"symbol":"ETHUSD","side":"buy","type":"market","qty":0.01,"lev":5}</pre>
+      <p>برای سفارش Limit، <code>type</code> را <code>limit</code> و <code>price</code> را هم ارسال کنید. نمادهای فیوچرز: BTCUSD، ETHUSD، SOLUSD، XRPUSD، DOGEUSD، ADAUSD، AVAXUSD، LINKUSD، DOTUSD، LTCUSD، BCHUSD، TRXUSD، XLMUSD، AAVEUSD و UNIUSD.</p>
+      <h5>بستن پوزیشن</h5>
+      <p>برای بستن لانگ، سفارش <code>sell</code> و برای بستن شورت، سفارش <code>buy</code> با همان <code>qty</code> پوزیشن بفرستید. قبل از آن <code>GET /api/positions</code> را بخوانید.</p>
+      <pre>POST /api/order
+{"symbol":"ETHUSD","side":"sell","type":"market","qty":0.01,"lev":5}</pre>
+      <h5>لغو سفارش</h5>
+      <pre>POST /api/cancel
+{"id":123}</pre>
+      <h5>نمونهٔ Python</h5>
+      <pre>import os, requests
+BASE = "https://ariax-1.onrender.com"
+h = {"X-API-Key": os.environ["ARIAX_KEY"],
+     "X-API-Secret": os.environ["ARIAX_SECRET"]}
+r = requests.post(BASE + "/api/order", headers=h, json={
+  "symbol":"ETHUSD", "side":"buy", "type":"market",
+  "qty":0.01, "lev":5})
+print(r.json())</pre>
+      <p><b>کارمزد:</b> میکر ۰٫۰۲٪ و تیکر ۰٫۰۵٪ است. پاسخ API را پیش از سفارش بعدی بررسی کنید، حجم را با <code>minq</code>/<code>step</code> موجود در <code>/api/config</code> معتبر کنید و روی خطای شبکه سفارش را کورکورانه تکرار نکنید.</p>
+    </section>
   </div>
   <div class="modal hidden" id="modal-bot">
     <button class="m-close">✕</button>
