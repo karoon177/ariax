@@ -34,6 +34,18 @@ MARKETS = {
     'BTCUSD':    dict(base='BTC',  kind='perp', price=115265.0, vol=0.0009, tick=0.1,    step=0.0001, minq=0.0005, qbase=0.35, maxlev=100),
     'ETHUSD':    dict(base='ETH',  kind='perp', price=4311.2,   vol=0.0011, tick=0.01,   step=0.001,  minq=0.005,  qbase=4.0,  maxlev=50),
     'SOLUSD':    dict(base='SOL',  kind='perp', price=186.45,   vol=0.0016, tick=0.01,   step=0.01,   minq=0.05,   qbase=45.0, maxlev=20),
+    'XRPUSD':    dict(base='XRP', kind='perp', price=1.02, vol=.002, tick=.0001, step=1, minq=1, qbase=800, maxlev=20),
+    'DOGEUSD':   dict(base='DOGE',kind='perp', price=.07, vol=.002, tick=.00001,step=1, minq=10,qbase=8000,maxlev=20),
+    'ADAUSD':    dict(base='ADA', kind='perp', price=.19, vol=.002, tick=.0001, step=1, minq=10,qbase=4000,maxlev=20),
+    'AVAXUSD':   dict(base='AVAX',kind='perp', price=6.45, vol=.002, tick=.001, step=.01,minq=.1,qbase=80,maxlev=20),
+    'LINKUSD':   dict(base='LINK',kind='perp', price=8.27, vol=.002, tick=.001, step=.01,minq=.1,qbase=60,maxlev=20),
+    'DOTUSD':    dict(base='DOT', kind='perp', price=.81, vol=.002, tick=.0001,step=.1,minq=1,qbase=700,maxlev=20),
+    'LTCUSD':    dict(base='LTC', kind='perp', price=45.1, vol=.002, tick=.01, step=.01,minq=.01,qbase=12,maxlev=20),
+    'BCHUSD':    dict(base='BCH', kind='perp', price=212.9,vol=.002,tick=.01, step=.001,minq=.001,qbase=3,maxlev=20),
+    'TRXUSD':    dict(base='TRX', kind='perp', price=.331,vol=.002,tick=.00001,step=1,minq=10,qbase=3000,maxlev=20),
+    'XLMUSD':    dict(base='XLM', kind='perp', price=.163,vol=.002,tick=.0001,step=1,minq=10,qbase=2000,maxlev=20),
+    'AAVEUSD':   dict(base='AAVE',kind='perp', price=89.8, vol=.002, tick=.01, step=.001,minq=.001,qbase=4,maxlev=20),
+    'UNIUSD':    dict(base='UNI', kind='perp', price=3.96, vol=.002, tick=.001,step=.01,minq=.01,qbase=70,maxlev=20),
 }
 
 PERP_UNDERLYING = {'BTCUSD': 'BTC/USDT', 'ETHUSD': 'ETH/USDT', 'SOLUSD': 'SOL/USDT'}
@@ -43,7 +55,10 @@ REFERENCE = dict(source='Kraken', status='starting', updated=0.0, error='', pric
 KRAKEN_PAIRS = {'BTC/USDT':'XBTUSDT', 'ETH/USDT':'ETHUSDT', 'SOL/USDT':'SOLUSDT',
                 'XRP/USDT':'XRPUSDT', 'DOGE/USDT':'XDGUSDT'}
 # قراردادهای دائمی از بازار Futures همان مرجع دریافت می‌شوند (mark price).
-KRAKEN_FUTURES = {'BTCUSD':'PF_XBTUSD', 'ETHUSD':'PF_ETHUSD', 'SOLUSD':'PF_SOLUSD'}
+KRAKEN_FUTURES = {'BTCUSD':'PF_XBTUSD', 'ETHUSD':'PF_ETHUSD', 'SOLUSD':'PF_SOLUSD',
+                  'XRPUSD':'PF_XRPUSD', 'DOGEUSD':'PF_DOGEUSD', 'ADAUSD':'PF_ADAUSD', 'AVAXUSD':'PF_AVAXUSD',
+                  'LINKUSD':'PF_LINKUSD', 'DOTUSD':'PF_DOTUSD', 'LTCUSD':'PF_LTCUSD', 'BCHUSD':'PF_BCHUSD',
+                  'TRXUSD':'PF_TRXUSD', 'XLMUSD':'PF_XLMUSD', 'AAVEUSD':'PF_AAVEUSD', 'UNIUSD':'PF_UNIUSD'}
 REF_LOCK = threading.Lock()
 OHLC_CACHE = {}
 OHLC_LOCK = threading.Lock()
@@ -90,7 +105,7 @@ class Market:
 
 MARKET_STATE = {}
 for _s, _c in MARKETS.items():
-    if _c['kind'] == 'perp':
+    if _c['kind'] == 'perp' and _s in PERP_UNDERLYING:
         _c = dict(_c)
         _c['price'] = MARKET_STATE[PERP_UNDERLYING[_s]].price * random.uniform(0.9995, 1.0005)
     MARKET_STATE[_s] = Market(_s, _c)
