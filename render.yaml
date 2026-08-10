@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: ariax-testnet
+    runtime: python
+    region: oregon
+    # پلن رایگان: مناسب تست‌نت؛ پس از بی‌استفاده‌بودن ممکن است سرویس sleep شود.
+    plan: free
+    buildCommand: ""
+    startCommand: python3 server.py
+    healthCheckPath: /api/markets
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: PORT
+        value: 10000

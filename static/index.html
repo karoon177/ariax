@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>آریا‌اکس | صرافی آزمایشی با مدیریت هوش مصنوعی</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233b82f6'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='Arial' font-weight='bold'%3EA%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand" onclick="switchView('trade')">
+    <span class="logo">A</span><b>آریا‌اکس</b><span class="badge-test">TESTNET</span>
+  </div>
+  <nav>
+    <button class="navbtn active" data-v="trade">معاملات</button>
+    <button class="navbtn" data-v="markets">بازارها</button>
+    <button class="navbtn" data-v="wallet">کیف پول</button>
+    <button class="navbtn" data-v="ai">🤖 داشبورد هوش مصنوعی</button>
+  </nav>
+  <div class="head-left">
+    <span class="conn" id="conn-dot" title="اتصال">●</span>
+    <button class="btn small ghost" id="btn-faucet">💧 سرمایه تستی</button>
+    <button class="btn small primary" id="btn-auth">ورود / ثبت‌نام</button>
+    <div id="user-chip" class="chip hidden"></div>
+  </div>
+</header>
+
+<div id="ticker-strip"></div>
+
+<main>
+  <!-- ============ معاملات ============ -->
+  <section id="view-trade" class="view">
+    <div class="trade-grid">
+      <aside class="panel orderform-panel">
+        <div class="kind-switch">
+          <button id="kind-spot" class="active">اسپات</button>
+          <button id="kind-perp">فیوچرز</button>
+        </div>
+        <div class="side-switch">
+          <button id="side-buy" class="buy active">خرید</button>
+          <button id="side-sell" class="sell">فروش</button>
+        </div>
+        <div class="of-row tabs-mini">
+          <button data-t="limit" class="active">لیمیت</button>
+          <button data-t="market">مارکت</button>
+        </div>
+        <label>قیمت (USDT)</label>
+        <input id="of-price" type="number" step="any" placeholder="0.00">
+        <label>مقدار</label>
+        <input id="of-qty" type="number" step="any" placeholder="0.00">
+        <input id="of-pct" type="range" min="0" max="100" value="0">
+        <div id="lev-row" class="hidden">
+          <label>اهرم: <b id="lev-val">10x</b></label>
+          <input id="of-lev" type="range" min="1" max="100" value="10">
+        </div>
+        <div class="of-info">
+          <span>قابل استفاده:</span><b id="of-avail">—</b>
+        </div>
+        <div class="of-info">
+          <span>ارزش سفارش:</span><b id="of-total">0 USDT</b>
+        </div>
+        <button id="of-submit" class="btn buy-btn big">خرید</button>
+        <div class="fees">کارمزد: میکر ۰.۰۲٪ | تیکر ۰.۰۵٪</div>
+      </aside>
+
+      <div class="center-col">
+        <div class="panel sym-bar">
+          <div class="sym-main">
+            <div class="sym-name"><b id="sb-symbol">BTC/USDT</b><span class="sym-kind" id="sb-kind">اسپات</span></div>
+            <div class="sym-price" id="sb-price">—</div>
+            <div class="sym-chg" id="sb-chg">—</div>
+          </div>
+          <div class="sym-stats">
+            <span>بیشترین ۲۴س: <b id="sb-high">—</b></span>
+            <span>کمترین ۲۴س: <b id="sb-low">—</b></span>
+            <span>حجم ۲۴س: <b id="sb-vol">—</b></span>
+          </div>
+          <div class="iv-btns">
+            <button data-iv="1m" class="active">1m</button>
+            <button data-iv="5m">5m</button>
+            <button data-iv="15m">15m</button>
+            <button data-iv="1h">1h</button>
+            <button data-iv="4h">4h</button>
+          </div>
+        </div>
+        <div class="panel chart-wrap">
+          <div id="ohlc-line"></div>
+          <canvas id="chart"></canvas>
+        </div>
+        <div class="panel bottom-panel">
+          <div class="bp-tabs">
+            <button data-bp="orders" class="active">سفارش‌های باز <span id="cnt-orders">0</span></button>
+            <button data-bp="positions">پوزیشن‌ها <span id="cnt-pos">0</span></button>
+            <button data-bp="history">تاریخچه</button>
+            <button data-bp="assets">دارایی‌ها</button>
+            <button id="btn-cancelall" class="mini danger-ghost">لغو همه</button>
+          </div>
+          <div class="bp-body">
+            <table id="tbl-orders"><thead><tr><th>نماد</th><th>جهت</th><th>نوع</th><th>قیمت</th><th>مقدار</th><th>باقی‌مانده</th><th></th></tr></thead><tbody></tbody></table>
+            <table id="tbl-positions" class="hidden"><thead><tr><th>نماد</th><th>جهت</th><th>اندازه</th><th>ورود</th><th>مارک</th><th>اهرم</th><th>مارجین</th><th>PnL</th><th>لیکوئید</th></tr></thead><tbody></tbody></table>
+            <table id="tbl-history" class="hidden"><thead><tr><th>زمان</th><th>نماد</th><th>جهت</th><th>قیمت</th><th>مقدار</th><th>کارمزد</th></tr></thead><tbody></tbody></table>
+            <table id="tbl-assets" class="hidden"><thead><tr><th>دارایی</th><th>موجودی</th><th>در سفارش</th><th>ارزش (USDT)</th></tr></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel book-panel">
+        <div class="book-head"><b>دفتر سفارشات</b><span id="book-spread"></span></div>
+        <div class="book-cols"><span>قیمت</span><span>مقدار</span><span>جمع</span></div>
+        <div id="asks"></div>
+        <div class="book-mid" id="book-last">—</div>
+        <div id="bids"></div>
+        <div class="trades-head"><b>آخرین معاملات</b></div>
+        <div class="book-cols"><span>قیمت</span><span>مقدار</span><span>زمان</span></div>
+        <div id="recent-trades"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============ بازارها ============ -->
+  <section id="view-markets" class="view hidden">
+    <div class="panel">
+      <h2>بازارهای آریا‌اکس <small>قیمت‌ها توسط ایجنت اوراکل شبیه‌سازی می‌شوند</small></h2>
+      <table id="tbl-markets" class="mk-table">
+        <thead><tr><th>نماد</th><th>نوع</th><th>آخرین قیمت</th><th>تغییر ۲۴س</th><th>بیشترین</th><th>کمترین</th><th>حجم ۲۴س</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ کیف پول ============ -->
+  <section id="view-wallet" class="view hidden">
+    <div class="wallet-head panel">
+      <div>
+        <div class="wl-label">ارزش خالص دارایی (USDT)</div>
+        <div class="wl-equity" id="wl-equity">—</div>
+        <div class="wl-sub">مارجین درگیر: <b id="wl-margin">0</b> | مارجین آزاد: <b id="wl-free">0</b></div>
+      </div>
+      <div class="wl-actions">
+        <button class="btn primary" id="btn-deposit">واریز</button>
+        <button class="btn ghost" id="btn-withdraw">برداشت</button>
+        <button class="btn ghost" id="btn-faucet2">💧 فاست</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>دارایی‌ها</h3>
+      <table id="tbl-wallet"><thead><tr><th>دارایی</th><th>موجودی کل</th><th>در سفارش/مارجین</th><th>قابل برداشت</th><th>ارزش USDT</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <h3>تاریخچه تراکنش‌ها</h3>
+      <table id="tbl-ledger"><thead><tr><th>زمان</th><th>نوع</th><th>دارایی</th><th>مبلغ</th><th>توضیح</th></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- ============ داشبورد هوش مصنوعی ============ -->
+  <section id="view-ai" class="view hidden">
+    <div class="ai-hero panel">
+      <h2>🧠 مرکز فرماندهی هوش مصنوعی</h2>
+      <p>این صرافی به‌صورت خودکار توسط تیمی از ایجنت‌های هوش مصنوعی اداره می‌شود. هر ایجنت مسئول یک حوزه است و می‌توانید آن را فعال/غیرفعال کنید.</p>
+      <div class="ai-stats" id="ai-stats"></div>
+    </div>
+    <div class="agents-grid" id="agents-grid"></div>
+    <div class="panel chat-panel">
+      <h3>💬 چت با پشتیبان هوشمند</h3>
+      <div id="chat-box"></div>
+      <div class="chat-input">
+        <input id="chat-msg" placeholder="سؤال خود را بپرسید… (کارمزد، فاست، اهرم، لیکوئیدیشن…)">
+        <button class="btn primary" id="chat-send">ارسال</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ============ مودال‌ها ============ -->
+<div id="modal-backdrop" class="hidden">
+  <div class="modal" id="modal-auth">
+    <button class="m-close">✕</button>
+    <div class="m-tabs"><button id="tab-login" class="active">ورود</button><button id="tab-register">ثبت‌نام</button></div>
+    <label>ایمیل</label><input id="auth-email" type="email" placeholder="you@example.com">
+    <div id="name-field" class="hidden"><label>نام</label><input id="auth-name" placeholder="نام شما"></div>
+    <label>رمز عبور</label><input id="auth-pass" type="password" placeholder="••••••">
+    <button class="btn primary big full" id="auth-submit">ورود</button>
+    <p class="m-note">در ثبت‌نام ۲۰,۰۰۰ USDT آزمایشی هدیه می‌گیرید 🎁</p>
+  </div>
+  <div class="modal hidden" id="modal-tx">
+    <button class="m-close">✕</button>
+    <h3 id="tx-title">واریز</h3>
+    <label>دارایی</label>
+    <select id="tx-asset"></select>
+    <label>مبلغ</label><input id="tx-amount" type="number" step="any" placeholder="0.00">
+    <div id="tx-addr-wrap"><label>آدرس (شبیه‌سازی)</label><input id="tx-addr" placeholder="آدرس کیف پول مقصد"></div>
+    <button class="btn primary big full" id="tx-submit">تأیید</button>
+    <p class="m-note" id="tx-note"></p>
+  </div>
+  <div class="modal hidden" id="modal-bot">
+    <button class="m-close">✕</button>
+    <h3>📈 معامله‌گر خودکار</h3>
+    <label>نماد فیوچرز</label>
+    <select id="bot-sym"><option value="BTCUSD">BTCUSD</option><option value="ETHUSD">ETHUSD</option><option value="SOLUSD">SOLUSD</option></select>
+    <label>اهرم: <b id="bot-lev-val">5x</b></label>
+    <input id="bot-lev" type="range" min="1" max="20" value="5">
+    <p class="m-note">ایجنت معامله‌گر بر اساس تقاطع EMA روی قیمت‌های لحظه‌ای، برای حساب شما معامله می‌کند.</p>
+    <div class="m-row"><button class="btn primary" id="bot-start">شروع</button><button class="btn ghost" id="bot-stop">توقف</button></div>
+    <p class="m-note" id="bot-status"></p>
+  </div>
+</div>
+<div id="toasts"></div>
+<script src="/app.js"></script>
+</body>
+</html>
