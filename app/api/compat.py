@@ -330,11 +330,49 @@ async def wallet(request: Request):
     bals = {a: round(acct.free(a), 8) for a in config.LISTED_ASSETS}
     locks = {a: round(acct.held(a), 8) for a in config.LISTED_ASSETS}
     locks["MARGIN"] = round(STATE.margin_used(uid), 4)
+    fbals = {"USDT": round(acct.ffree("USDT"), 8)}
+    flocks = {"USDT": round(acct.fheld("USDT"), 8)}
     equity = STATE.equity_usdt(uid)
     return {"ok": True, "balances": bals, "locks": locks,
+            "spot": {"balances": bals, "locks": locks},
+            "futures": {"balances": fbals, "locks": flocks},
             "margin_used": round(STATE.margin_used(uid), 4),
             "free_margin": round(STATE.free_margin(uid), 4),
             "equity": round(equity, 4)}
+
+
+@router.post("/transfer")
+async def transfer_funds(request: Request):
+    """Move real funds between the Spot and Futures wallets (UI)."""
+    uid = await _uid(request)
+    b = await _json(request)
+    frm = (b.get("from") or "").lower()
+    to = (b.get("to") or "").lower()
+    if {frm, to} != {"spot", "futures"}:
+        return _err("انتقال فقط بین اسپات و فیوچرز ممکن است")
+    try:
+        amount = float(b.get("amount", 0))
+    except (TypeError, ValueError):
+        return _err("مبلغ نامعتبر است")
+    if amount <= 0:
+        return _err("مبلغ باید مثبت باشد")
+    acct = STATE.account(uid)
+    direction = "spot_to_futures" if frm == "spot" else "futures_to_spot"
+    source_avail = acct.available("USDT") if frm == "spot" else acct.favailable("USDT")
+    if source_avail < amount - 1e-9:
+        wallet_name = "اسپات" if frm == "spot" else "فیوچرز"
+        return _err(f"موجودی قابل انتقال کیف {wallet_name} کافی نیست")
+    moved = acct.transfer(amount, "USDT", direction)
+    if moved <= 0:
+        return _err("انتقال انجام نشد")
+    from ..engine import matching
+    matching.ledger(uid, "transfer", "USDT", moved,
+                    f"{'اسپات' if frm == 'spot' else 'فیوچرز'}→"
+                    f"{'اسپات' if to == 'spot' else 'فیوچرز'} {moved:.4f} USDT")
+    matching._persist_balances(uid, ["USDT"])
+    return {"ok": True, "moved": round(moved, 8),
+            "spot": round(acct.free("USDT"), 8),
+            "futures": round(acct.ffree("USDT"), 8)}
 
 
 @router.post("/faucet")

@@ -228,30 +228,44 @@ async def _write_new_order(session, snap: dict) -> None:
 # Reservations                                                                 #
 # --------------------------------------------------------------------------- #
 def _reserve(o: Order) -> None:
+    """Reserve balances for an order from the correct wallet bucket.
+
+    Linear orders draw margin/fees from the FUTURES wallet; when it runs
+    short, a transparent auto-bridge tops it up from the SPOT wallet
+    (keeps UTA-style bots working without manual transfers).
+    """
     cfg = config.MARKETS[o.symbol]
     acct = STATE.account(o.uid)
     if o.category == "spot":
         if o.side == "Buy":
             need = o.est_price * o.qty * (1 + config.SPOT_TAKER_FEE)
             if acct.available("USDT") < need:
-                raise ApiError(E_INSUFFICIENT_BALANCE, "insufficient USDT balance")
-            acct.add_hold(o.id, "USDT", need)
+                raise ApiError(E_INSUFFICIENT_BALANCE,
+                               "insufficient USDT balance in Spot wallet")
+            acct.add_hold(o.id, "USDT", need, bucket="spot")
         else:
             if acct.available(cfg.base) < o.qty:
                 raise ApiError(E_INSUFFICIENT_BALANCE,
                                f"insufficient {cfg.base} balance")
-            acct.add_hold(o.id, cfg.base, o.qty)
+            acct.add_hold(o.id, cfg.base, o.qty, bucket="spot")
         return
-    # linear
+    # linear (FUTURES wallet with spot auto-bridge)
     pos = STATE.position(o.uid, o.symbol)
     opening = not pos or pos.size == 0 or (pos.size > 0) == (o.side == "Buy")
     if opening and not o.reduce_only:
         lev = o.leverage
         need_margin = o.est_price * o.qty / lev * 1.05
         need_fee = o.est_price * o.qty * config.LINEAR_TAKER_FEE
-        if STATE.free_margin(o.uid) < need_margin + need_fee:
-            raise ApiError(E_INSUFFICIENT_BALANCE, "insufficient free margin")
-        acct.add_hold(o.id, "USDT", need_margin + need_fee)
+        shortfall = (need_margin + need_fee) - STATE.free_margin(o.uid)
+        if shortfall > 1e-9:
+            moved = _auto_bridge(o.uid, shortfall)
+            if STATE.free_margin(o.uid) < need_margin + need_fee - 1e-9:
+                raise ApiError(
+                    E_INSUFFICIENT_BALANCE,
+                    "insufficient futures margin (transfer funds to the "
+                    "Futures wallet via /v5/asset/transfer/inter-transfer "
+                    "or the wallet page)")
+        acct.add_hold(o.id, "USDT", need_margin + need_fee, bucket="futures")
     else:
         avail_size = abs(pos.size) - STATE.close_locks.get((o.uid, o.symbol), 0.0) \
             if pos else 0.0
@@ -261,11 +275,33 @@ def _reserve(o: Order) -> None:
             STATE.close_locks.get((o.uid, o.symbol), 0.0) + o.qty
 
 
+def _auto_bridge(uid: int, need: float) -> float:
+    """Move `need` USDT spot→futures when possible; ledger-recorded."""
+    acct = STATE.account(uid)
+    movable = min(need, acct.available("USDT"))
+    if movable <= 1e-9:
+        return 0.0
+    moved = acct.transfer(movable, "USDT", "spot_to_futures")
+    if moved > 0:
+        matching.ledger(uid, "auto_transfer", "USDT", moved,
+                        f"Auto-bridge spot→futures {moved:.4f} USDT")
+        _persist_balances_fn(uid)
+    return moved
+
+
+def _persist_balances_fn(uid: int) -> None:
+    from . import matching
+    acct = STATE.accounts.get(uid)
+    assets = list(set(list((acct.balances if acct else {}).keys()) +
+                      list((acct.fbalances if acct else {}).keys()))) or ["USDT"]
+    matching._persist_balances(uid, assets)
+
+
 def _release_all(o: Order) -> None:
     """Release every reservation still held by an order (cancel/kill)."""
     acct = STATE.accounts.get(o.uid)
-    if acct and o.id in acct.holds:
-        acct.holds.pop(o.id, None)
+    if acct:
+        acct.clear_holds(o.id)
     _unlock(o, o.leaves)
 
 

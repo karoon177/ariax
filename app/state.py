@@ -124,12 +124,22 @@ class Position:
 
 @dataclass
 class Account:
-    """Per-user wallet (UTA): free balances + per-order holds."""
+    """Per-user dual wallet (classic exchange layout).
+
+    SPOT bucket    — spot trading, deposits, faucet, signup bonus;
+    FUTURES bucket — linear derivatives: margin, fees, funding, PnL.
+    A transparent auto-bridge moves funds spot→futures on demand when a
+    linear order lacks futures balance (keeps UTA-style bots working),
+    while explicit transfers (UI / inter-transfer) move real funds.
+    """
 
     uid: int
-    balances: dict[str, float] = field(default_factory=dict)
-    holds: dict[int, dict[str, float]] = field(default_factory=dict)  # order.id -> asset->amt
+    balances: dict[str, float] = field(default_factory=dict)    # SPOT
+    fbalances: dict[str, float] = field(default_factory=dict)   # FUTURES
+    holds: dict[int, dict[str, float]] = field(default_factory=dict)    # spot order holds
+    fholds: dict[int, dict[str, float]] = field(default_factory=dict)   # linear order holds
 
+    # ---- SPOT bucket ---------------------------------------------------- #
     def free(self, asset: str = "USDT") -> float:
         return self.balances.get(asset, 0.0)
 
@@ -139,17 +149,54 @@ class Account:
     def available(self, asset: str = "USDT") -> float:
         return self.free(asset) - self.held(asset)
 
-    def add_hold(self, order_id: int, asset: str, amount: float) -> None:
-        self.holds.setdefault(order_id, {})
-        self.holds[order_id][asset] = self.holds[order_id].get(asset, 0.0) + amount
+    # ---- FUTURES bucket --------------------------------------------------#
+    def ffree(self, asset: str = "USDT") -> float:
+        return self.fbalances.get(asset, 0.0)
 
-    def release_hold(self, order_id: int, asset: str, amount: float) -> None:
-        h = self.holds.get(order_id)
-        if not h:
+    def fheld(self, asset: str = "USDT") -> float:
+        return sum(h.get(asset, 0.0) for h in self.fholds.values())
+
+    def favailable(self, asset: str = "USDT") -> float:
+        return self.ffree(asset) - self.fheld(asset)
+
+    # ---- holds ----------------------------------------------------------- #
+    def add_hold(self, order_id: int, asset: str, amount: float,
+                 bucket: str = "spot") -> None:
+        h = self.holds if bucket == "spot" else self.fholds
+        h.setdefault(order_id, {})
+        h[order_id][asset] = h[order_id].get(asset, 0.0) + amount
+
+    def release_hold(self, order_id: int, asset: str, amount: float,
+                     bucket: str = "spot") -> None:
+        h = self.holds if bucket == "spot" else self.fholds
+        rec = h.get(order_id)
+        if not rec:
             return
-        h[asset] = max(0.0, h.get(asset, 0.0) - amount)
-        if all(v <= 1e-12 for v in h.values()):
-            self.holds.pop(order_id, None)
+        rec[asset] = max(0.0, rec.get(asset, 0.0) - amount)
+        if all(v <= 1e-12 for v in rec.values()):
+            h.pop(order_id, None)
+
+    def clear_holds(self, order_id: int) -> None:
+        self.holds.pop(order_id, None)
+        self.fholds.pop(order_id, None)
+
+    # ---- real transfer --------------------------------------------------- #
+    def transfer(self, amount: float, asset: str = "USDT",
+                 direction: str = "spot_to_futures") -> float:
+        """Move real funds between buckets; returns amount moved."""
+        if direction == "spot_to_futures":
+            amount = min(amount, self.available(asset))
+            if amount <= 0:
+                return 0.0
+            self.balances[asset] = self.free(asset) - amount
+            self.fbalances[asset] = self.ffree(asset) + amount
+        else:
+            amount = min(amount, self.favailable(asset))
+            if amount <= 0:
+                return 0.0
+            self.fbalances[asset] = self.ffree(asset) - amount
+            self.balances[asset] = self.free(asset) + amount
+        return amount
 
 
 @dataclass
@@ -270,11 +317,12 @@ class ExchangeState:
         return self.leverage.get((uid, symbol), default)
 
     def equity_usdt(self, uid: int) -> float:
-        """Unified equity: USDT balance + position margins + unrealised PnL."""
+        """Total equity: spot USDT + futures USDT + escrowed margins + uPnL."""
         acct = self.accounts.get(uid)
-        eq = (acct.free("USDT") if acct else 0.0) + sum(
-            p.margin for (u, _), p in self.positions.items() if u == uid
-        )
+        eq = 0.0
+        if acct:
+            eq += acct.free("USDT") + acct.ffree("USDT")
+        eq += sum(p.margin for (u, _), p in self.positions.items() if u == uid)
         eq += sum(p.unrealised(m.mark) for (u, s), p in self.positions.items()
                   if u == uid for m in [self.markets.get(s)] if m)
         return eq
@@ -283,10 +331,15 @@ class ExchangeState:
         return sum(p.margin for (u, _), p in self.positions.items() if u == uid)
 
     def free_margin(self, uid: int) -> float:
+        """Spendable margin: futures-bucket USDT minus linear order holds.
+
+        (Position margin was already escrowed OUT of the futures bucket at
+        open, so it must not be subtracted again here.)
+        """
         acct = self.accounts.get(uid)
-        base = (acct.free("USDT") if acct else 0.0) - self.margin_used(uid)
-        held = acct.held("USDT") if acct else 0.0
-        return base - held
+        if not acct:
+            return 0.0
+        return acct.favailable("USDT")
 
     # ---- book/market ------------------------------------------------------ #
     def tick(self, symbol: str) -> MarketTick:

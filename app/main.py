@@ -63,6 +63,11 @@ async def load_state(database: dbm.Database) -> None:
             acct = STATE.account(row["uid"])
             if row["free"]:
                 acct.balances[row["asset"]] = row["free"]
+        res = await sess.execute(select(dbm.t_futures_balances))
+        for row in res.mappings():
+            acct = STATE.account(row["uid"])
+            if row["free"]:
+                acct.fbalances[row["asset"]] = row["free"]
 
         # --- positions ---------------------------------------------------- #
         res = await sess.execute(select(dbm.t_positions))
@@ -125,6 +130,21 @@ async def load_state(database: dbm.Database) -> None:
         res = await sess.execute(select(dbm.t_faucet))
         for row in res.mappings():
             STATE.faucet[row["uid"]] = row["last_ms"] / 1000.0
+
+    # One-time migration for legacy unified accounts: users with open
+    # positions move all USDT to the futures wallet so margin/fees/funding
+    # keep settling correctly under the new dual-wallet layout.
+    users_with_positions = {u for (u, _) in STATE.positions}
+    for uid in users_with_positions:
+        acct = STATE.accounts.get(uid)
+        if not acct:
+            continue
+        if acct.ffree("USDT") <= 0 and acct.free("USDT") > 0:
+            moved = acct.transfer(acct.available("USDT"), "USDT",
+                                  "spot_to_futures")
+            if moved > 0:
+                log.info("migrated %s USDT to futures wallet for uid %s",
+                         moved, uid)
 
 
 def _pos_from_row(row):

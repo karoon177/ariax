@@ -71,13 +71,13 @@ def _execute_liquidation(uid: int, symbol: str, pos, mark: float,
         agent_log(f"Liquidation fallback settle for #{uid} {symbol}: {exc}")
         _bankruptcy_settle(uid, symbol, pos, mark)
 
-    # 3) leftover margin -> insurance; shortfall -> insurance covers
+    # 3) leftover margin -> futures wallet; shortfall -> insurance covers
     pos2 = STATE.position(uid, symbol)
     if pos2 and pos2.size == 0:
         leftover = pos2.margin
         if leftover > 0:
-            STATE.account(uid).balances["USDT"] = \
-                STATE.account(uid).free("USDT") + leftover
+            STATE.account(uid).fbalances["USDT"] = \
+                STATE.account(uid).ffree("USDT") + leftover
         STATE.positions.pop((uid, symbol), None)
         matching._persist_position(uid, symbol)
         matching.persist_all_user_state(uid)
@@ -110,7 +110,7 @@ def _bankruptcy_settle(uid: int, symbol: str, pos, mark: float) -> None:
     acct = STATE.account(uid)
     direction = 1.0 if pos.size > 0 else -1.0
     pnl = (mark - pos.entry) * pos.size
-    acct.balances["USDT"] = acct.free("USDT") + max(0.0, pos.margin + pnl)
+    acct.fbalances["USDT"] = acct.ffree("USDT") + max(0.0, pos.margin + pnl)
     STATE.positions.pop((uid, symbol), None)
     matching._persist_position(uid, symbol)
     matching.persist_all_user_state(uid)

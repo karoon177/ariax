@@ -212,24 +212,43 @@ def position_legacy(uid: int, symbol: str, pos) -> dict:
                 tp=pos.tp, sl=pos.sl)
 
 
-def wallet_event_v5(uid: int) -> dict:
+def wallet_event_v5(uid: int, account_type: str = "UNIFIED") -> dict:
+    """Wallet balances per account type.
+
+    UNIFIED  -> spot + futures combined (UTA view);
+    SPOT     -> spot bucket only;
+    CONTRACT -> futures bucket only (classic derivatives wallet).
+    """
     acct = STATE.account(uid)
     coins = []
     for asset in config.LISTED_ASSETS:
-        free = acct.free(asset)
+        if account_type == "CONTRACT":
+            if asset != "USDT":
+                continue
+            free = acct.ffree(asset)
+            avail = max(0.0, acct.favailable(asset))
+        elif account_type == "SPOT":
+            free = acct.free(asset)
+            avail = max(0.0, acct.available(asset))
+        else:  # UNIFIED
+            free = acct.free(asset) + (acct.ffree(asset)
+                                       if asset == "USDT" else 0.0)
+            avail = max(0.0, acct.available(asset)) + \
+                (max(0.0, acct.favailable(asset)) if asset == "USDT" else 0.0)
         if free <= 0 and asset != "USDT":
             continue
         coins.append({"coin": asset, "equity": f"{free:.8f}",
                       "walletBalance": f"{free:.8f}",
-                      "availableToWithdraw": f"{max(0.0, free - acct.held(asset)):.8f}",
+                      "availableToWithdraw": f"{avail:.8f}",
                       "totalPositionIM": f"{STATE.margin_used(uid) if asset == 'USDT' else 0:.4f}",
-                      "totalOrderIM": f"{acct.held('USDT') if asset == 'USDT' else 0:.4f}"})
-    return {"accountType": "UNIFIED", "balances": coins}
+                      "totalOrderIM": f"{(acct.held('USDT') + acct.fheld('USDT')) if asset == 'USDT' else 0:.4f}"})
+    return {"accountType": account_type, "balances": coins}
 
 
 def wallet_v5(uid: int) -> dict:
-    data = wallet_event_v5(uid)
+    data = wallet_event_v5(uid, "UNIFIED")
     data["totalEquity"] = f"{STATE.equity_usdt(uid):.4f}"
-    data["totalAvailableBalance"] = f"{STATE.free_margin(uid):.4f}"
+    data["totalAvailableBalance"] = \
+        f"{STATE.account(uid).available('USDT') + STATE.free_margin(uid):.4f}"
     data["totalMarginBalance"] = f"{STATE.equity_usdt(uid):.4f}"
     return data

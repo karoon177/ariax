@@ -81,20 +81,32 @@ async def _write_exec(session, exec_id, order_id, uid, symbol, category, side,
 
 
 def _persist_balances(uid: int, assets: list[str]) -> None:
+    """Persist BOTH wallet buckets (spot + futures) for the touched assets."""
     acct = STATE.accounts.get(uid)
     if not acct:
         return
-    vals = {a: acct.free(a) for a in assets}
-    events.BUS.emit("persist", lambda s: _write_balances(s, uid, vals))
+    spot_vals = {a: acct.free(a) for a in assets}
+    fut_vals = {a: acct.ffree(a) for a in assets}
+    events.BUS.emit("persist", lambda s: _write_balances(s, uid, spot_vals,
+                                                         fut_vals))
 
 
-async def _write_balances(session, uid: int, vals: dict) -> None:
+async def _write_balances(session, uid: int, vals: dict, fvals: dict) -> None:
     from .. import db
     for asset, free in vals.items():
         await session.execute(
             db.t_balances.update()
             .where((db.t_balances.c.uid == uid) & (db.t_balances.c.asset == asset))
             .values(free=free))
+    for asset, free in fvals.items():
+        res = await session.execute(
+            db.t_futures_balances.update()
+            .where((db.t_futures_balances.c.uid == uid) &
+                   (db.t_futures_balances.c.asset == asset))
+            .values(free=free))
+        if res.rowcount == 0 and free != 0.0:
+            await session.execute(db.t_futures_balances.insert().values(
+                uid=uid, asset=asset, free=free))
 
 
 def _persist_position(uid: int, symbol: str) -> None:
@@ -170,10 +182,16 @@ def release_est_hold(o: Order, qty: float) -> None:
     acct = STATE.accounts.get(o.uid)
     if not acct:
         return
-    if o.category == "spot" and o.side == "Sell":
-        acct.release_hold(o.id, config.MARKETS[o.symbol].base, qty)
+    if o.category == "spot":
+        if o.side == "Sell":
+            acct.release_hold(o.id, config.MARKETS[o.symbol].base, qty,
+                              bucket="spot")
+        else:
+            acct.release_hold(o.id, "USDT", _unit_est(o) * qty,
+                              bucket="spot")
     else:
-        acct.release_hold(o.id, "USDT", _unit_est(o) * qty)
+        acct.release_hold(o.id, "USDT", _unit_est(o) * qty,
+                          bucket="futures")
 
 
 def settle_fill(o: Order, px: float, q: float, fee_rate: float,
@@ -209,10 +227,10 @@ def _settle_spot(o: Order, cfg, px: float, q: float, fee: float) -> None:
         acct.balances["USDT"] = acct.free("USDT") + px * q - fee
 
 
-def _settle_linear(o: Order, cfg, px: float, q: float, fee: float) -> None:
+def _settle_linear(o: Order, cfg, px: float, q: float, fee: float) -> None:  # noqa: C901
     uid = o.uid
     acct = STATE.account(uid)
-    acct.balances["USDT"] = acct.free("USDT") - fee
+    acct.fbalances["USDT"] = acct.ffree("USDT") - fee
     signed = q if o.side == "Buy" else -q
     key = (uid, o.symbol)
     pos = STATE.positions.get(key)
@@ -224,7 +242,7 @@ def _settle_linear(o: Order, cfg, px: float, q: float, fee: float) -> None:
         released = pos.margin * (closeq / abs(pos.size))
         pos.size -= direction * closeq
         pos.margin -= released
-        acct.balances["USDT"] = acct.free("USDT") + pnl + released
+        acct.fbalances["USDT"] = acct.ffree("USDT") + pnl + released
         ledger(uid, "realized_pnl", "USDT", pnl,
                f"Realized PnL {o.symbol} {'long' if direction > 0 else 'short'}")
         events.BUS.emit("pnl", {"uid": uid, "symbol": o.symbol, "pnl": pnl})
@@ -244,7 +262,7 @@ def _settle_linear(o: Order, cfg, px: float, q: float, fee: float) -> None:
         pos.size = new_size
         pos.leverage = lev
         pos.margin += add_margin
-        acct.balances["USDT"] = acct.free("USDT") - add_margin
+        acct.fbalances["USDT"] = acct.ffree("USDT") - add_margin
         # Entry-attached TP/SL (Bybit tpslMode=Full equivalent)
         if o.tp_price and (pos.tp is None or o.tp_price != pos.tp):
             pos.tp = o.tp_price

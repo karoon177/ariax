@@ -373,16 +373,20 @@ def test_inter_transfer_compatibility(client):
                                "amount": "5000", "fromAccountType": "SPOT",
                                "toAccountType": "CONTRACT"})
     assert r2.json()["retCode"] == 0
-    # 3) CONTRACT wallet now shows the (unified) balance
+    # 3) CONTRACT wallet shows the REAL transferred amount (dual wallet)
     q = _signed(client, "GET", "/v5/asset/transfer/query-account-coins-balance",
                 key, secret, params={"accountType": "CONTRACT", "coin": "USDT"})
     res = q.json()["result"]
     assert res["accountType"] == "CONTRACT"
-    assert float(res["list"][0]["walletBalance"]) == 20_000
-    # 4) transferable amount equals the unified available balance
+    assert float(res["list"][0]["walletBalance"]) == 5_000
+    # spot wallet decreased by the real transfer
+    s = _signed(client, "GET", "/v5/asset/transfer/query-account-coins-balance",
+                key, secret, params={"accountType": "SPOT", "coin": "USDT"})
+    assert float(s.json()["result"]["list"][0]["walletBalance"]) == 15_000
+    # 4) transferable amount from CONTRACT equals futures availability
     t = _signed(client, "GET", "/v5/account/transferable-amount", key, secret,
                 params={"accountType": "CONTRACT", "coin": "USDT"})
-    assert float(t.json()["result"]["transferableAmount"]) == 20_000
+    assert float(t.json()["result"]["transferableAmount"]) == 5_000
     # 5) history lists the transfer
     h = _signed(client, "GET", "/v5/asset/transfer/query-inter-transfer-list",
                 key, secret, params={"limit": "10"})
@@ -396,9 +400,54 @@ def test_inter_transfer_compatibility(client):
                                 "fromAccountType": "SPOT",
                                 "toAccountType": "CONTRACT"})
     assert bad.json()["retCode"] == 110007
-    # 7) wallet-balance answers for CONTRACT account type too
+    # 7) reverse transfer moves funds back to spot
+    back = _signed(client, "POST", "/v5/asset/transfer/inter-transfer", key,
+                   secret, body={"transferId": "tr-test-3", "coin": "USDT",
+                                 "amount": "2000", "fromAccountType": "CONTRACT",
+                                 "toAccountType": "SPOT"})
+    assert back.json()["retCode"] == 0
+    s2 = _signed(client, "GET", "/v5/asset/transfer/query-account-coins-balance",
+                 key, secret, params={"accountType": "SPOT", "coin": "USDT"})
+    assert float(s2.json()["result"]["list"][0]["walletBalance"]) == 17_000
+    # 8) wallet-balance answers for CONTRACT account type too
     w = _signed(client, "GET", "/v5/account/wallet-balance", key, secret,
                 params={"accountType": "CONTRACT", "coin": "USDT"})
     wl = w.json()["result"]["list"][0]
     assert wl["accountType"] == "CONTRACT"
-    assert wl["coin"][0]["coin"] == "USDT"
+    assert float(wl["coin"][0]["walletBalance"]) == 3_000
+
+
+def test_dual_wallet_auto_bridge_and_ui_transfer(client):
+    """UI transfer endpoint + transparent spot→futures auto-bridge."""
+    token, _ = _register(client, "dual@example.com")
+    h = {"Authorization": f"Bearer {token}"}
+    # 1) manual UI transfer: spot -> futures
+    t0 = client.post("/api/transfer", headers=h,
+                     json={"from": "spot", "to": "futures", "amount": 5000})
+    assert t0.json()["ok"] and t0.json()["futures"] == 5000
+    # 2) linear order uses the futures wallet (no bridge needed)
+    r = client.post("/api/order", headers=h, json={
+        "symbol": "BTCUSD", "side": "buy", "type": "limit",
+        "price": 95_000, "qty": 0.01, "lev": 10})
+    assert r.json()["ok"], r.text
+    w = client.get("/api/wallet", headers=h).json()
+    assert w["futures"]["balances"]["USDT"] == 5000          # free untouched
+    assert w["futures"]["locks"]["USDT"] > 0                  # margin held
+    # 3) transfer back what is available
+    avail = w["futures"]["balances"]["USDT"] - w["futures"]["locks"]["USDT"]
+    t = client.post("/api/transfer", headers=h,
+                    json={"from": "futures", "to": "spot", "amount": avail})
+    assert t.json()["ok"] and t.json()["moved"] == pytest.approx(avail)
+    # 4) auto-bridge: an order larger than the futures wallet pulls from spot
+    w2 = client.get("/api/wallet", headers=h).json()
+    spot_before = w2["balances"]["USDT"]
+    r2 = client.post("/api/order", headers=h, json={
+        "symbol": "BTCUSD", "side": "buy", "type": "limit",
+        "price": 95_000, "qty": 0.2, "lev": 10})   # needs ~1995 margin
+    assert r2.json()["ok"], r2.text
+    w3 = client.get("/api/wallet", headers=h).json()
+    assert w3["balances"]["USDT"] < spot_before     # bridge moved real funds
+    # 5) overdraft UI transfer rejected with a Persian error
+    bad = client.post("/api/transfer", headers=h,
+                      json={"from": "futures", "to": "spot", "amount": 10**9})
+    assert not bad.json()["ok"]

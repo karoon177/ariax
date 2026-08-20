@@ -51,27 +51,38 @@ def _ok(result: dict) -> dict:
 
 
 def _record_transfer(uid: int, transfer_id: str, coin: str, amount: float,
-                     frm: str, to: str) -> None:
-    """Persist the bookkeeping row and in-memory registry."""
+                     frm: str, to: str, moved: float | None = None) -> None:
+    """Persist the transfer row and in-memory registry."""
     from ..engine import matching
     _TRANSFER_IDS[transfer_id] = {"status": "SUCCESS", "ts": util.now_ms()}
     log = _TRANSFER_LOG.setdefault(uid, deque(maxlen=200))
     log.appendleft(dict(transferId=transfer_id, coin=coin, amount=amount,
                         fromAccountType=frm, toAccountType=to,
                         timestamp=util.now_ms(), status="SUCCESS"))
-    # unified wallet: balances unchanged; ledger records the intent
-    matching.ledger(uid, "transfer", coin, 0.0,
-                    f"{frm}→{to} {amount:g} {coin} (UTA unified wallet, "
-                    f"no balance move required) transferId={transfer_id}")
+    if moved is None:
+        note = (f"{frm}→{to} {amount:g} {coin} (unified view, "
+                f"no bucket move) transferId={transfer_id}")
+        matching.ledger(uid, "transfer", coin, 0.0, note)
+    else:
+        note = (f"{frm}→{to} {moved:g} {coin} transferId={transfer_id}")
+        matching.ledger(uid, "transfer", coin, moved, note)
+        assets = [coin, "USDT"]
+        matching._persist_balances(uid, assets)
+
+
+def _bucket_move(uid: int, coin: str, amount: float, direction: str) -> float:
+    """Real spot<->futures bucket transfer; returns moved amount."""
+    acct = STATE.account(uid)
+    return acct.transfer(amount, coin, direction)
 
 
 @router.post("/asset/transfer/inter-transfer")
 async def inter_transfer(request: Request):
     """Transfer funds between account types (Bybit v5 semantics).
 
-    Because the wallet is UNIFIED, the transfer always succeeds and does
-    not change spendable balances; it is recorded for history/auditing
-    and for compatibility with bots that pre-fund a CONTRACT wallet.
+    SPOT <-> CONTRACT moves REAL funds between the spot and futures
+    wallets. Types involving UNIFIED/FUND are recorded as unified-view
+    bookkeeping (combined wallet, no bucket move needed).
     """
     rec = await deps.verify_v5_signature(request, require="trade")
     b = await _json(request)
@@ -94,11 +105,23 @@ async def inter_transfer(request: Request):
                        f"account types must be one of {ACCOUNT_TYPES}")
     if amount <= 0:
         raise ApiError(E_PARAM, "amount must be positive")
-    acct = STATE.account(rec["uid"])
-    if acct.available(coin) < amount:
-        raise ApiError(110007, f"insufficient {coin} balance")
-    # idempotent: repeated transferId returns the same success
-    if transfer_id not in _TRANSFER_IDS:
+    if transfer_id in _TRANSFER_IDS:  # idempotent replay
+        return _ok({"transferId": transfer_id, "status": "SUCCESS"})
+
+    pair = {frozenset(("SPOT", "CONTRACT"))}
+    real_move = frozenset((frm, to)) in pair
+    if real_move:
+        acct = STATE.account(rec["uid"])
+        src_avail = acct.available(coin) if frm == "SPOT" else acct.favailable(coin)
+        if src_avail < amount - 1e-9:
+            raise ApiError(110007,
+                           f"insufficient {coin} in "
+                           f"{'Spot' if frm == 'SPOT' else 'Futures'} wallet")
+        direction = "spot_to_futures" if frm == "SPOT" else "futures_to_spot"
+        moved = _bucket_move(rec["uid"], coin, amount, direction)
+        _record_transfer(rec["uid"], transfer_id, coin, amount, frm, to,
+                         moved=moved)
+    else:
         _record_transfer(rec["uid"], transfer_id, coin, amount, frm, to)
     return _ok({"transferId": transfer_id, "status": "SUCCESS"})
 
@@ -106,28 +129,23 @@ async def inter_transfer(request: Request):
 @router.get("/asset/transfer/query-account-coins-balance")
 async def query_account_coins(request: Request, accountType: str = "UNIFIED",
                               coin: str | None = None):
-    """Per-account-type balance view (all types see the unified wallet)."""
+    """Per-account-type balance view (SPOT / CONTRACT / UNIFIED)."""
     rec = await deps.verify_v5_signature(request)
-    acct = STATE.account(rec["uid"])
+    from ..api.serializers import wallet_event_v5
     accountType = accountType.upper()
     if accountType not in ACCOUNT_TYPES:
         raise ApiError(E_PARAM, f"accountType must be one of {ACCOUNT_TYPES}")
     coins = []
-    for asset in config.LISTED_ASSETS:
-        if coin and asset != coin.upper():
+    for c in wallet_event_v5(rec["uid"], accountType)["balances"]:
+        if coin and c["coin"] != coin.upper():
             continue
-        free = acct.free(asset)
-        if free <= 0 and asset != "USDT":
-            continue
-        coins.append({
-            "coin": asset,
-            "transferBalance": f"{free:.8f}",
-            "walletBalance": f"{free:.8f}",
-            "bonus": "0",
-        })
+        coins.append({"coin": c["coin"],
+                      "transferBalance": c["availableToWithdraw"],
+                      "walletBalance": c["walletBalance"],
+                      "bonus": "0"})
     return _ok({
         "accountType": accountType,
-        "accountId": f"ariax-unified-{rec['uid']}",
+        "accountId": f"ariax-{accountType.lower()}-{rec['uid']}",
         "list": coins,
     })
 
@@ -153,11 +171,18 @@ async def query_inter_transfer_list(request: Request,
 @router.get("/account/transferable-amount")
 async def transferable_amount(request: Request, accountType: str = "UNIFIED",
                               coin: str = "USDT"):
-    """Max transferable = available (free minus holds) balance."""
+    """Max transferable from the given account type's wallet."""
     rec = await deps.verify_v5_signature(request)
     accountType = accountType.upper()
     if accountType not in ACCOUNT_TYPES:
         raise ApiError(E_PARAM, f"accountType must be one of {ACCOUNT_TYPES}")
     acct = STATE.account(rec["uid"])
-    available = acct.available(coin.upper())
+    coin = coin.upper()
+    if accountType == "CONTRACT":
+        available = acct.favailable(coin)
+    elif accountType == "SPOT":
+        available = acct.available(coin)
+    else:  # UNIFIED combined
+        available = acct.available(coin) + \
+            (acct.favailable(coin) if coin == "USDT" else 0.0)
     return _ok({"transferableAmount": f"{max(0.0, available):.8f}"})

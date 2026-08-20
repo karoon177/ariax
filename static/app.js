@@ -332,6 +332,41 @@ function renderAssets() {
   }).join('');
 }
 
+// v2.1: dual-wallet cards (Spot / Futures) with real transfers
+function renderDualWallets() {
+  if (!S.wallet || !S.wallet.futures) return;
+  const spotFree = S.wallet.spot ? S.wallet.spot.balances.USDT : (S.wallet.balances.USDT || 0);
+  const spotLock = S.wallet.spot ? (S.wallet.spot.locks.USDT || 0) : (S.wallet.locks.USDT || 0);
+  const futFree = S.wallet.futures.balances.USDT || 0;
+  const futLock = S.wallet.futures.locks.USDT || 0;
+  const card = (title, icon, free, lock, dir, btnLabel, color) => `
+    <div style="flex:1;min-width:240px;border:1px solid var(--line,var(--mut));border-radius:12px;padding:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b>${icon} ${title}</b>
+        <button class="mini ghost" onclick="transferModal('${dir}')">${btnLabel}</button>
+      </div>
+      <div class="num" style="font-size:1.35rem;margin:8px 0 2px;color:${color}">${fmt(free, 4)} <span style="font-size:.75rem;opacity:.7">USDT</span></div>
+      <div style="font-size:.8rem;opacity:.75">در سفارش/مارجین: ${fmt(lock, 4)} · قابل استفاده: ${fmt(Math.max(0, free - lock), 4)}</div>
+    </div>`;
+  $('#dual-wallets').innerHTML =
+    card('کیف اسپات', '🟢', spotFree, spotLock, 'spot_to_futures', '⇄ انتقال به فیوچرز', 'var(--g, #16a34a)') +
+    card('کیف فیوچرز', '🟠', futFree, futLock, 'futures_to_spot', '⇄ انتقال به اسپات', 'var(--r, #dc2626)');
+}
+
+window.transferModal = async (direction) => {
+  const toName = direction === 'spot_to_futures' ? 'فیوچرز' : 'اسپات';
+  const fromName = direction === 'spot_to_futures' ? 'اسپات' : 'فیوچرز';
+  const src = direction === 'spot_to_futures' ? S.wallet.spot : S.wallet.futures;
+  const avail = Math.max(0, (src.balances.USDT || 0) - (src.locks.USDT || 0));
+  const inp = prompt(`انتقال از کیف ${fromName} به کیف ${toName}\nقابل انتقال: ${fmt(avail, 4)} USDT\nمبلغ را وارد کنید:`);
+  if (inp === null || inp === '') return;
+  const amount = parseFloat(inp);
+  if (!amount || amount <= 0) return toast('مبلغ نامعتبر است', 'err');
+  const r = await api('/api/transfer', { from: direction === 'spot_to_futures' ? 'spot' : 'futures', to: direction === 'spot_to_futures' ? 'futures' : 'spot', amount });
+  if (r.ok) { toast(`✅ ${fmt(r.moved, 4)} USDT به کیف ${toName} منتقل شد`, 'ok'); loadUser(); }
+  else toast(r.error || 'انتقال ناموفق بود', 'err');
+};
+
 let ASSET_LIST = ['USDT', 'BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];
 
 function renderMarkets() {
@@ -368,6 +403,7 @@ function renderWalletValues() {
   $('#wl-margin').textContent = fmt(S.wallet.margin_used, 2);
   $('#wl-free').textContent = fmt(S.wallet.free_margin, 2);
   renderAssets();
+  renderDualWallets();
   updateAvail();
 }
 
@@ -411,6 +447,8 @@ async function submitOrder() {
   if (!body.qty || body.qty <= 0) { toast('مقدار سفارش را وارد کنید', 'warn'); return; }
   const r = await api('/api/order', body);
   if (r.ok) toast('✅ سفارش ثبت شد (#' + r.id + ')', 'ok');
+  else if (S.kind === 'perp' && /مارجین|margin/i.test(r.error || ''))
+    toast((r.error || '') + ' — از کیف پول ⇄ وجه به فیوچرز منتقل کنید', 'warn');
   else toast(r.error || 'خطا در ثبت سفارش', 'err');
   refreshUser();
 }

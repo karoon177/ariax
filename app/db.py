@@ -68,6 +68,13 @@ t_balances = sa.Table(
     sa.Column("free", sa.Float, nullable=False, default=0.0),
 )
 
+t_futures_balances = sa.Table(
+    "futures_balances", meta,
+    sa.Column("uid", sa.Integer, primary_key=True),
+    sa.Column("asset", sa.Text, primary_key=True),
+    sa.Column("free", sa.Float, nullable=False, default=0.0),
+)
+
 t_orders = sa.Table(
     "orders", meta,
     sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),  # legacy int id

@@ -103,7 +103,9 @@ def test_linear_open_close_realized_pnl():
     assert pos.size == pytest.approx(0.5)
     assert pos.margin == pytest.approx(5_000)             # half released
     # realized pnl = (110k-100k) * 0.5 = +5000; margin 10k back minus 5k held
-    assert STATE.account(1).free("USDT") > 1e6 - 5_000 - 60
+    # (dual wallet: derivatives cash lives in the futures bucket)
+    total = STATE.account(1).free("USDT") + STATE.account(1).ffree("USDT")
+    assert total > 1e6 - 5_000 - 60
 
 
 def test_liquidation_price_direction_and_formula():
@@ -144,13 +146,13 @@ def test_funding_rate_clamp_and_next_ts():
     assert r2 == pytest.approx(-config.FUNDING_CAP)
     nf = next_funding_ts(1_700_000_000_000, 8)
     assert nf > 1_700_000_000_000 and nf % (8 * 3600_000) == 0
-    STATE.account(9).balances["USDT"] = 1000
+    STATE.account(9).fbalances["USDT"] = 1000
     STATE.get_or_init_position(9, "BTCUSD").__dict__.update(
         size=1.0, entry=100_000, leverage=10, margin=10_000)
     STATE.tick("BTCUSD").mark = 100_000
     n = settle_funding("BTCUSD", 0.0001, 100_000)
     assert n == 1
-    assert STATE.account(9).free("USDT") == pytest.approx(1000 - 10)
+    assert STATE.account(9).ffree("USDT") == pytest.approx(1000 - 10)
 
 
 # --------------------------------------------------------------------------- #

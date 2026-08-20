@@ -49,9 +49,9 @@ def settle_funding(symbol: str, rate: float, mark: float) -> int:
         payment = rate * mark * abs(pos.size)   # >0: longs pay shorts
         acct = STATE.account(uid)
         if pos.size > 0:
-            acct.balances["USDT"] = acct.free("USDT") - payment
+            acct.fbalances["USDT"] = acct.ffree("USDT") - payment
         else:
-            acct.balances["USDT"] = acct.free("USDT") + payment
+            acct.fbalances["USDT"] = acct.ffree("USDT") + payment
         matching.ledger(uid, "funding", "USDT", -payment if pos.size > 0 else payment,
                         f"Funding {symbol} rate={rate:.6f}")
         events.BUS.emit("wallet", {"uid": uid})

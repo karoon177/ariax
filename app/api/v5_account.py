@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request
 
 from .. import config, util
 from ..api import deps
-from ..api.serializers import position_v5, wallet_v5
+from ..api.serializers import position_v5, wallet_event_v5, wallet_v5
 from ..engine import matching, orders as oms
 from ..errors import ApiError, E_PARAM, E_SYMBOL_INVALID
 from ..runtime import get_db, get_persister
@@ -48,8 +48,8 @@ async def wallet_balance(request: Request, accountType: str = "UNIFIED",
         accountType = "UNIFIED"
     data = wallet_v5(rec["uid"])
     data.pop("list", None)
-    # UTA: every account type sees the same unified balances
-    coins = data.pop("balances")
+    # SPOT/CONTRACT views show their own bucket; UNIFIED shows combined
+    coins = wallet_event_v5(rec["uid"], accountType)["balances"]
     if coin:
         coins = [c for c in coins if c["coin"] == coin.upper()]
     data["list"] = [{
