@@ -352,3 +352,53 @@ def test_legacy_api_shapes(client):
     assert not r.json()["ok"]  # price deviation guard
     orders_list = client.get("/api/orders", headers=h).json()
     assert orders_list["ok"] and orders_list["data"] == []
+
+
+# --------------------------------------------------------------------------- #
+# v2.0.2: Bybit inter-transfer compatibility (futures wallet funding)          #
+# --------------------------------------------------------------------------- #
+def test_inter_transfer_compatibility(client):
+    token, _ = _register(client, "transfer@example.com")
+    key, secret = _make_key(client, token)
+    # 1) classic bot flow: fund the CONTRACT (futures) wallet from SPOT
+    r = _signed(client, "POST", "/v5/asset/transfer/inter-transfer", key, secret,
+                body={"transferId": "tr-test-1", "coin": "USDT",
+                      "amount": "5000", "fromAccountType": "SPOT",
+                      "toAccountType": "CONTRACT"})
+    body = r.json()
+    assert body["retCode"] == 0 and body["result"]["status"] == "SUCCESS", body
+    # 2) idempotent replay of the same transferId
+    r2 = _signed(client, "POST", "/v5/asset/transfer/inter-transfer", key,
+                 secret, body={"transferId": "tr-test-1", "coin": "USDT",
+                               "amount": "5000", "fromAccountType": "SPOT",
+                               "toAccountType": "CONTRACT"})
+    assert r2.json()["retCode"] == 0
+    # 3) CONTRACT wallet now shows the (unified) balance
+    q = _signed(client, "GET", "/v5/asset/transfer/query-account-coins-balance",
+                key, secret, params={"accountType": "CONTRACT", "coin": "USDT"})
+    res = q.json()["result"]
+    assert res["accountType"] == "CONTRACT"
+    assert float(res["list"][0]["walletBalance"]) == 20_000
+    # 4) transferable amount equals the unified available balance
+    t = _signed(client, "GET", "/v5/account/transferable-amount", key, secret,
+                params={"accountType": "CONTRACT", "coin": "USDT"})
+    assert float(t.json()["result"]["transferableAmount"]) == 20_000
+    # 5) history lists the transfer
+    h = _signed(client, "GET", "/v5/asset/transfer/query-inter-transfer-list",
+                key, secret, params={"limit": "10"})
+    rows = h.json()["result"]["list"]
+    assert rows and rows[0]["transferId"] == "tr-test-1"
+    assert rows[0]["status"] == "SUCCESS"
+    # 6) overdraft transfer rejected
+    bad = _signed(client, "POST", "/v5/asset/transfer/inter-transfer", key,
+                  secret, body={"transferId": "tr-test-2", "coin": "USDT",
+                                "amount": "99999999",
+                                "fromAccountType": "SPOT",
+                                "toAccountType": "CONTRACT"})
+    assert bad.json()["retCode"] == 110007
+    # 7) wallet-balance answers for CONTRACT account type too
+    w = _signed(client, "GET", "/v5/account/wallet-balance", key, secret,
+                params={"accountType": "CONTRACT", "coin": "USDT"})
+    wl = w.json()["result"]["list"][0]
+    assert wl["accountType"] == "CONTRACT"
+    assert wl["coin"][0]["coin"] == "USDT"

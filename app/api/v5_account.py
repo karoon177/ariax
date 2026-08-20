@@ -43,19 +43,21 @@ def _map_symbol(category: str, symbol: str) -> str:
 async def wallet_balance(request: Request, accountType: str = "UNIFIED",
                          coin: str | None = None):
     rec = await deps.verify_v5_signature(request)
+    accountType = accountType.upper()
+    if accountType not in ("UNIFIED", "FUND", "CONTRACT", "SPOT"):
+        accountType = "UNIFIED"
     data = wallet_v5(rec["uid"])
+    data.pop("list", None)
+    # UTA: every account type sees the same unified balances
+    coins = data.pop("balances")
     if coin:
-        data["list"] = [{
-            "accountType": "UNIFIED",
-            "totalEquity": data["totalEquity"],
-            "coin": [c for c in data["balances"] if c["coin"] == coin]}]
-        data.pop("balances", None)
-    else:
-        data["list"] = [{"accountType": "UNIFIED",
-                         "totalEquity": data["totalEquity"],
-                         "totalMarginBalance": data.get("totalMarginBalance", "0"),
-                         "totalAvailableBalance": data["totalAvailableBalance"],
-                         "coin": data.pop("balances")}]
+        coins = [c for c in coins if c["coin"] == coin.upper()]
+    data["list"] = [{
+        "accountType": accountType,
+        "totalEquity": data["totalEquity"],
+        "totalMarginBalance": data.get("totalMarginBalance", "0"),
+        "totalAvailableBalance": data["totalAvailableBalance"],
+        "coin": coins}]
     return _ok(data)
 
 

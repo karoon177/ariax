@@ -30,7 +30,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from . import agents, config, db as dbm, events, security, users, util
 from . import runtime
-from .api import compat, v5_account, v5_extra, v5_market, v5_trade
+from .api import compat, v5_account, v5_extra, v5_market, v5_trade, v5_transfer
 from .api.deps import SESSION_DB_LOADER
 from .engine import orderbook
 from .engine.funding import funding_loop
@@ -283,6 +283,7 @@ def create_app() -> FastAPI:
     app.include_router(v5_market.router)
     app.include_router(v5_trade.router)
     app.include_router(v5_account.router)
+    app.include_router(v5_transfer.router)
     app.include_router(v5_extra.router)
     app.include_router(compat.router)
 
