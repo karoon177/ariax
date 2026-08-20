@@ -96,10 +96,15 @@ async def get_klines(symbol: str, interval: str, limit: int,
     limit = max(1, min(int(limit), 1000))
     t = STATE.tick(symbol)
 
-    if source == "last" and config.MARKETS[symbol].kind == "spot":
-        real = await kraken_ohlc(symbol, n, limit)
-        if real:
-            return real[-limit:][::-1], "Kraken", False
+    if source == "last":
+        # real Kraken OHLC for spot pairs AND for linear perps via their
+        # spot underlying (mark ≈ spot; keeps long-interval history deep)
+        spot_symbol = symbol if config.MARKETS[symbol].kind == "spot" \
+            else config.PERP_UNDERLYING.get(symbol)
+        if spot_symbol:
+            real = await kraken_ohlc(spot_symbol, n, limit)
+            if real:
+                return real[-limit:][::-1], "Kraken", False
 
     base = list(t.candles1m) + ([t.cur] if t.cur else [])
     if source != "last":
