@@ -1,0 +1,10 @@
+# AriaX Testnet Exchange v2 — production dependencies
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+sqlalchemy>=2.0.30
+aiosqlite>=0.20
+asyncpg>=0.29
+httpx>=0.27
+websockets>=12.0
+cryptography>=42.0

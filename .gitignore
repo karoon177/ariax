@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# AriaX v2 runtime data (never commit databases/keys)
+data/
+*.db
+master.key

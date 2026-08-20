@@ -1,16 +1,27 @@
+# AriaX Testnet Exchange v2 — IaC blueprint for Render.com
+#
+# Deploy steps (free tier friendly):
+#   1. Create a free PostgreSQL instance in the Render dashboard.
+#   2. Set env var DATABASE_URL to its (internal) connection string.
+#   3. Optionally set ARIAX_MASTER_KEY (base64, 32 bytes) and ADMIN_TOKEN.
 services:
   - type: web
     name: ariax-testnet
     runtime: python
     region: oregon
-    # پلن رایگان: مناسب تست‌نت؛ پس از بی‌استفاده‌بودن ممکن است سرویس sleep شود.
     plan: free
-    buildCommand: ""
-    startCommand: python3 server.py
-    healthCheckPath: /api/markets
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python3 server.py"
+    healthCheckPath: /v5/market/time
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12.0
-      - key: PORT
-        value: 10000
+        value: "3.12.0"
+      - key: DATABASE_URL
+        sync: false          # set to your Render PostgreSQL internal URL
+      - key: ARIAX_MASTER_KEY
+        sync: false          # optional: base64 32-byte key for API-secret encryption
+      - key: ADMIN_TOKEN
+        sync: false          # optional: enables /v5/admin/* stress-test helpers
+      - key: FAUCET_COOLDOWN_HOURS
+        value: "24"

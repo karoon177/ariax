@@ -1,0 +1,22 @@
+{
+  "crash": {
+    "duration_s": 13.6,
+    "alive": true
+  },
+  "volume": {
+    "ok": 60,
+    "rejected": 0
+  },
+  "ws_churn": {
+    "ok": 120,
+    "failed": 0,
+    "seconds": 0.3
+  },
+  "flood": {
+    "ops_per_s": 362.5,
+    "p50_ms": 89.0,
+    "p95_ms": 325.0,
+    "p99_ms": 482.1,
+    "errors": 16
+  }
+}

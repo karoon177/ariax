@@ -241,6 +241,20 @@ function renderSymBar() {
   $('#sb-high').textContent = pfmt(S.symbol, t.high);
   $('#sb-low').textContent = pfmt(S.symbol, t.low);
   $('#sb-vol').textContent = '$' + fmt(t.vol, 0);
+  // v2: mark price + funding rate strip (linear only)
+  const fr = $('#sb-funding');
+  if (fr) {
+    if (t.kind === 'perp') {
+      fr.parentElement.classList.remove('hidden');
+      fr.textContent = (t.funding >= 0 ? '+' : '') + fmt(t.funding, 4) + '%';
+      fr.className = 'num ' + (t.funding >= 0 ? 'r' : 'g');
+    } else fr.parentElement.classList.add('hidden');
+  }
+  const mkEl = $('#sb-mark');
+  if (mkEl) {
+    if (t.kind === 'perp') { mkEl.parentElement.classList.remove('hidden'); mkEl.textContent = pfmt(S.symbol, t.mark); }
+    else mkEl.parentElement.classList.add('hidden');
+  }
   updateAvail();
 }
 
@@ -283,6 +297,20 @@ window.cancelOrder = async id => {
   if (!r.ok) toast(r.error || 'خطا', 'err');
 };
 
+// v2: set Take-Profit / Stop-Loss on an open position (Bybit trading-stop)
+window.promptTPSL = async (symbol, tp, sl) => {
+  const ntp = prompt('قیمت حد سود (TP) — خالی = بدون تغییر' + (tp ? `\nفعلی: ${tp}` : ''), tp || '');
+  if (ntp === null) return;
+  const nsl = prompt('قیمت حد ضرر (SL) — خالی = بدون تغییر' + (sl ? `\nفعلی: ${sl}` : ''), sl || '');
+  if (nsl === null) return;
+  const body = { symbol };
+  if (ntp.trim() !== '') body.tp = parseFloat(ntp) || 0;
+  if (nsl.trim() !== '') body.sl = parseFloat(nsl) || 0;
+  const r = await api('/api/tpsl', body);
+  if (r.ok) { toast('TP/SL ثبت شد ✅', 'ok'); loadUser(); }
+  else toast(r.error || 'خطا', 'err');
+};
+
 function renderPositions() {
   $('#cnt-pos').textContent = S.positions.length;
   $('#tbl-positions tbody').innerHTML = S.positions.map(p => {
@@ -290,7 +318,7 @@ function renderPositions() {
     const upnl = (t.last - p.entry) * p.size;
     const notional = Math.abs(p.size) * t.last;
     const roe = p.margin ? upnl / p.margin * 100 : 0;
-    return `<tr><td>${p.symbol}</td><td class="${p.size > 0 ? 'g' : 'r'}">${p.size > 0 ? 'لانگ' : 'شورت'}</td><td class="num">${fmt(Math.abs(p.size), 6)}</td><td class="num">${pfmt(p.symbol, p.entry)}</td><td class="num">${pfmt(p.symbol, t.last)}</td><td>${p.lev}x</td><td class="num">${fmt(p.margin, 2)}</td><td class="num ${upnl >= 0 ? 'g' : 'r'}">${fmt(upnl, 2)} (${fmt(roe, 1)}%)</td><td class="num">${pfmt(p.symbol, p.liq)}</td><td><button class="mini danger-ghost" onclick="closePosition('${p.symbol}',${p.size},${p.lev})">بستن</button></td></tr>`;
+    return `<tr><td>${p.symbol}</td><td class="${p.size > 0 ? 'g' : 'r'}">${p.size > 0 ? 'لانگ' : 'شورت'}</td><td class="num">${fmt(Math.abs(p.size), 6)}</td><td class="num">${pfmt(p.symbol, p.entry)}</td><td class="num">${pfmt(p.symbol, t.last)}</td><td>${p.lev}x</td><td class="num">${fmt(p.margin, 2)}</td><td class="num ${upnl >= 0 ? 'g' : 'r'}">${fmt(upnl, 2)} (${fmt(roe, 1)}%)</td><td class="num">${pfmt(p.symbol, p.liq)}</td><td><button class="mini danger-ghost" onclick="closePosition('${p.symbol}',${p.size},${p.lev})">بستن</button> <button class="mini ghost" onclick="promptTPSL('${p.symbol}',${p.tp || 'null'},${p.sl || 'null'})">TP/SL</button></td></tr>`;
   }).join('') || '<tr><td colspan="10" style="text-align:center;color:var(--mut)">پوزیشن بازی ندارید</td></tr>';
 }
 
@@ -557,15 +585,22 @@ async function init() {
   $('#api-create').onclick = async () => {
     const r = await api('/api/api-keys/create', {label: $('#api-label').value || 'Trading bot'});
     if (!r.ok) return toast(r.error || 'ساخت کلید ناموفق بود', 'err');
-    $('#api-result').innerHTML = `<b>API Key:</b><code>${r.key}</code><br><b>Secret:</b><code>${r.secret}</code><br>اکنون در جای امن ذخیره کنید؛ Secret دوباره نمایش داده نمی‌شود.`;
+    $('#api-result').innerHTML = `<b>API Key:</b><code>${r.key}</code><br><b>Secret:</b><code>${r.secret}</code><br>اکنون در جای امن ذخیره کنید؛ Secret دوباره نمایش داده نمی‌شود.<br><small style="color:var(--mut)">احراز هویت به سبک Bybit v5 (هدرهای X-BAPI-*) — نمونه پایتون: <code>scripts/ws_smoke_test.py</code> و مستندات: <code>API_REFERENCE.md</code></small>`;
   };
   $('#tab-login').onclick = () => { $('#tab-login').classList.add('active'); $('#tab-register').classList.remove('active'); $('#name-field').classList.add('hidden'); $('#auth-submit').textContent = 'ورود'; };
   $('#tab-register').onclick = () => { $('#tab-register').classList.add('active'); $('#tab-login').classList.remove('active'); $('#name-field').classList.remove('hidden'); $('#auth-submit').textContent = 'ثبت‌نام'; };
   $('#auth-submit').onclick = async () => {
     const reg = $('#tab-register').classList.contains('active');
-    const r = await api('/api/auth/' + (reg ? 'register' : 'login'), {
+    let r = await api('/api/auth/' + (reg ? 'register' : 'login'), {
       email: $('#auth-email').value, password: $('#auth-pass').value, name: $('#auth-name').value
     });
+    if (!r.ok && r.need_otp) {
+      const otp = prompt('حساب شما با تأیید دومرحله‌ای محافظت شده است.\nکد ۶ رقمی اپلیکیشن احراز هویت را وارد کنید:');
+      if (!otp) return toast('کد 2FA لازم است', 'err');
+      r = await api('/api/auth/login', {
+        email: $('#auth-email').value, password: $('#auth-pass').value, otp
+      });
+    }
     if (r.ok) {
       S.token = r.token; S.uid = r.uid;
       localStorage.setItem('ax_token', r.token); localStorage.setItem('ax_uid', r.uid);
