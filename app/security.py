@@ -37,7 +37,10 @@ from . import config
 def _load_master_key() -> bytes:
     """Resolve the AES master key from env or the key file (auto-created)."""
     if config.MASTER_KEY_B64:
-        raw = base64.b64decode(config.MASTER_KEY_B64)
+        b64 = config.MASTER_KEY_B64.strip()
+        # tolerate stripped base64 padding ("=" cut by tools/dashboards)
+        b64 += "=" * (-len(b64) % 4)
+        raw = base64.b64decode(b64)
         if len(raw) == 32:
             return raw
     path = os.path.join("data", "master.key")
