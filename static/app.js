@@ -604,6 +604,9 @@ async function init() {
   $$('.bp-tabs button[data-bp]').forEach(b => b.onclick = () => {
     $$('.bp-tabs button[data-bp]').forEach(x => x.classList.toggle('active', x === b));
     ['orders', 'positions', 'history', 'assets'].forEach(k => $('#tbl-' + k).classList.toggle('hidden', k !== b.dataset.bp));
+    const rw = $('#report-wrap');
+    if (rw) rw.classList.toggle('hidden', b.dataset.bp !== 'report');
+    if (b.dataset.bp === 'report') loadTradeReport();
   });
   $('#btn-cancelall').onclick = async () => { await api('/api/cancelall', {}); toast('همه سفارش‌ها لغو شدند', 'ok'); refreshUser(); };
   // order form
@@ -710,3 +713,33 @@ async function init() {
   }, 20000);
 }
 init();
+
+// v2.2: structured trade report (bot debugging)
+const REASON_FA = { StopLoss: 'حد ضرر', TakeProfit: 'حد سود', TrailingStop: 'دنبال‌کننده',
+  Liquidation: 'لیکوئید', manual: 'دستی/ربات', Conditional: 'شرطی' };
+async function loadTradeReport() {
+  if (!S.token) { $('#report-chips').innerHTML = '<span style="color:var(--mut)">برای مشاهده گزارش وارد شوید</span>'; return; }
+  const r = await api('/api/trade-report?limit=100');
+  if (!r.ok) return;
+  const chip = (t, v, cls) => `<span style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:4px 10px;font-size:.8rem">${t}: <b class="${cls||''} num">${v}</b></span>`;
+  const s = r.summary || {};
+  $('#report-chips').innerHTML =
+    chip('تریدها', s.trades || 0) +
+    chip('نرخ برد', (s.winrate || 0) + '%', (s.winrate >= 50 ? 'g' : 'r')) +
+    chip('خالص', (s.net >= 0 ? '+' : '') + fmt(s.net, 4) + '$', s.net >= 0 ? 'g' : 'r') +
+    chip('کارمزد', fmt(s.fees, 4) + '$') +
+    chip('فاندینگ', fmt(s.funding, 4) + '$', (s.funding <= 0 ? 'r' : 'g')) +
+    chip('میانگین نگهداری', (s.avg_hold_min || 0) + 'د') +
+    chip('بدترین', fmt(s.worst, 3) + '$', 'r') + chip('بهترین', fmt(s.best, 3) + '$', 'g');
+  $('#tbl-report tbody').innerHTML = (r.data || []).map(t => {
+    const dt = new Date((t.ts || 0) * 1000).toLocaleString('fa-IR', { hour12: false });
+    return `<tr><td class="num" style="font-size:.75rem">${dt}</td><td><b>${t.symbol}</b></td>
+      <td class="${t.side === 'long' ? 'g' : 'r'}">${t.side === 'long' ? 'لانگ' : 'شورت'}${t.partial ? ' <small>(جزئی)</small>' : ''}</td>
+      <td class="num">${fmt(t.qty, 6)}</td><td class="num">${fmt(t.entry, 6)}</td><td class="num">${fmt(t.exit, 6)}</td>
+      <td class="num">${fmt(t.fees, 4)}</td><td class="num ${t.funding <= 0 ? 'r' : 'g'}">${fmt(t.funding, 4)}</td>
+      <td class="num ${t.net >= 0 ? 'g' : 'r'}"><b>${fmt(t.net, 4)}</b></td>
+      <td class="num">${fmt(t.hold_min, 0)}د</td>
+      <td>${REASON_FA[t.reason] || t.reason}</td>
+      <td style="font-size:.75rem">${t.strategy || '—'}</td></tr>`;
+  }).join('') || '<tr><td colspan="12" style="text-align:center;color:var(--mut)">هنوز معامله بسته‌شده‌ای ندارید</td></tr>';
+}

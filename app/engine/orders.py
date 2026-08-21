@@ -54,6 +54,8 @@ def place_order(
     leverage: int | None = None,
     order_link_id: str | None = None,
     is_agent: bool = False,
+    strategy: str = "",
+    close_reason: str = "",
 ) -> Order:
     """Validate and submit an order. Raises ApiError on rejection."""
     cfg = config.MARKETS.get(symbol)
@@ -149,6 +151,7 @@ def place_order(
         order_link_id=order_link_id, id=STATE.order_seq,
         order_id=util.gen_hex(16) if uid > 0 else f"agent-{STATE.order_seq}",
         status="Created", created_ms=ts, updated_ms=ts, is_agent=is_agent,
+        strategy=(strategy or "")[:40], close_reason=(close_reason or "")[:24],
     )
     if order_type == "Market":
         o.mkt_cap = est_price if uid > 0 else float("inf")
@@ -576,8 +579,8 @@ def _force_close(uid: int, symbol: str, reason: str) -> bool:
         o = place_order(
             uid, symbol, side, "Market", abs(pos.size),
             reduce_only=True, close_on_trigger=True, leverage=pos.leverage,
+            close_reason=reason, strategy=pos.strategy,
         )
-        o.canceled_reason = ""  # it's a fill, not a cancel
         events.BUS.emit("tpsl", {"uid": uid, "symbol": symbol, "reason": reason})
         return True
     except ApiError:

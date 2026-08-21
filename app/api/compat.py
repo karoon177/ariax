@@ -208,7 +208,8 @@ async def place_order(request: Request):
             qty=float(b.get("qty", 0) or 0),
             price=float(b["price"]) if b.get("price") not in (None, "", 0, "0")
             else None,
-            leverage=int(lev) if lev else None)
+            leverage=int(lev) if lev else None,
+            strategy=(b.get("strategy") or "")[:40])
         return {"ok": True, "id": o.id}
     except (ApiError, KeyError, ValueError, TypeError) as exc:
         msg = exc.ret_msg if isinstance(exc, ApiError) else "پارامترهای سفارش نامعتبر است"
@@ -564,3 +565,64 @@ async def bot(request: Request):
         return {"ok": True, "active": bool(st and st.get("active")),
                 "sym": st and st["sym"]}
     return _err("اکشن نامعتبر")
+
+
+# --------------------------------------------------------------------------- #
+# v2.2: structured trade report (bot debugging)                                #
+# --------------------------------------------------------------------------- #
+@router.get("/trade-report")
+async def trade_report(request: Request, limit: int = 100):
+    """Rich closed-trade report + aggregates: entry/exit, fees, funding,
+    hold time, close reason (SL/TP/Trailing/Liquidation/manual) and the
+    bot's strategy tag — everything needed to debug a trading bot."""
+    uid = await _uid(request)
+    limit = max(1, min(limit, 300))
+    from .. import db
+    from sqlalchemy import select
+    async with get_db().session() as sess:
+        res = await sess.execute(
+            select(db.t_closed_trades)
+            .where(db.t_closed_trades.c.uid == uid)
+            .order_by(db.t_closed_trades.c.id.desc()).limit(limit))
+        rows = res.mappings().all()
+
+    def grp(rows, key):
+        out = {}
+        for r in rows:
+            k = r[key] or "—"
+            g = out.setdefault(k, {"n": 0, "wins": 0, "net": 0.0})
+            g["n"] += 1
+            g["wins"] += 1 if r["net_pnl"] > 0 else 0
+            g["net"] += r["net_pnl"]
+        for k, g in out.items():
+            g["net"] = round(g["net"], 6)
+            g["winrate"] = round(g["wins"] / g["n"] * 100, 1) if g["n"] else 0
+        return out
+
+    data = [dict(symbol=r["symbol"], side=r["side"], qty=r["qty"],
+                 entry=r["entry"], exit=r["exit"], gross=round(r["gross_pnl"], 6),
+                 fees=round(r["fees"], 6), funding=round(r["funding"], 6),
+                 net=round(r["net_pnl"], 6),
+                 hold_min=round(r["hold_seconds"] / 60.0, 1),
+                 reason=r["close_reason"], strategy=r["strategy"],
+                 partial=bool(r["partial"]), ts=r["ts_ms"] / 1000.0)
+            for r in rows]
+    full = [r for r in rows if not r["partial"]]
+    summary = dict(
+        trades=len(full),
+        wins=sum(1 for r in full if r["net_pnl"] > 0),
+        winrate=round(sum(1 for r in full if r["net_pnl"] > 0) / len(full) * 100, 1)
+        if full else 0.0,
+        gross=round(sum(r["gross_pnl"] for r in rows), 6),
+        fees=round(sum(r["fees"] for r in rows), 6),
+        funding=round(sum(r["funding"] for r in rows), 6),
+        net=round(sum(r["net_pnl"] for r in rows), 6),
+        avg_hold_min=round(sum(r["hold_seconds"] for r in full) / len(full) / 60.0, 1)
+        if full else 0.0,
+        best=round(max((r["net_pnl"] for r in rows), default=0.0), 6),
+        worst=round(min((r["net_pnl"] for r in rows), default=0.0), 6),
+        by_symbol=grp(rows, "symbol"),
+        by_reason=grp(rows, "close_reason"),
+        by_strategy=grp(rows, "strategy"),
+    )
+    return {"ok": True, "data": data, "summary": summary}

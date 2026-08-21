@@ -61,6 +61,8 @@ class Order:
     est_price: float = 0.0       # reference price used for balance reservation
     mkt_cap: float = 0.0         # slippage cap for Market orders (acts as limit)
     cum_fee: float = 0.0
+    close_reason: str = ""       # why this closing order exists (TP/SL/Liq/…)
+    strategy: str = ""           # bot tag persisted onto the position
 
     @property
     def is_conditional(self) -> bool:
@@ -87,6 +89,10 @@ class Position:
     trail_extreme: float = 0.0   # best price seen since trailing armed
     created_ms: int = 0
     updated_ms: int = 0
+    # ---- reporting accumulators (trade attribution) ----
+    funding_acc: float = 0.0     # funding paid/received while holding
+    fees_acc: float = 0.0        # entry fees attributable to open qty
+    strategy: str = ""           # tag from the opening order (bots)
 
     def side(self) -> str:
         return "Buy" if self.size > 0 else ("Sell" if self.size < 0 else "None")

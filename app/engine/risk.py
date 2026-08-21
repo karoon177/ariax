@@ -65,7 +65,9 @@ def _execute_liquidation(uid: int, symbol: str, pos, mark: float,
     try:
         o = orders.place_order(uid, symbol, side, "Market", size,
                                reduce_only=True, close_on_trigger=True,
-                               leverage=pos.leverage)
+                               leverage=pos.leverage,
+                               close_reason="Liquidation",
+                               strategy=pos.strategy)
         closed = o.status == "Filled"
     except Exception as exc:  # no liquidity left: settle at bankruptcy
         agent_log(f"Liquidation fallback settle for #{uid} {symbol}: {exc}")

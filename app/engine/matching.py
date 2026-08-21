@@ -236,15 +236,33 @@ def _settle_linear(o: Order, cfg, px: float, q: float, fee: float) -> None:  # n
     pos = STATE.positions.get(key)
     closeq = 0.0
     if pos and pos.size != 0 and (pos.size > 0) != (signed > 0):
-        closeq = min(abs(pos.size), q)
+        size0 = abs(pos.size)
+        was_long = pos.size > 0
+        closeq = min(size0, q)
         direction = 1.0 if pos.size > 0 else -1.0
         pnl = (px - pos.entry) * closeq * direction
-        released = pos.margin * (closeq / abs(pos.size))
+        released = pos.margin * (closeq / size0)
         pos.size -= direction * closeq
         pos.margin -= released
         acct.fbalances["USDT"] = acct.ffree("USDT") + pnl + released
+        # ---- attributed costs for this (partial) close ----
+        share = closeq / size0
+        close_fee = fee * (closeq / max(q, 1e-12))
+        entry_fee_share = pos.fees_acc * share
+        pos.fees_acc -= entry_fee_share
+        funding_share = pos.funding_acc * share
+        pos.funding_acc -= funding_share
+        partial_close = pos.size != 0
+        _record_closed_trade(o, "long" if was_long else "short", pos.entry,
+                             px, closeq, pnl, close_fee + entry_fee_share,
+                             funding_share, pos.created_ms, partial_close,
+                             pos.strategy)
         ledger(uid, "realized_pnl", "USDT", pnl,
-               f"Realized PnL {o.symbol} {'long' if direction > 0 else 'short'}")
+               f"Realized PnL {o.symbol} {'long' if direction > 0 else 'short'} "
+               f"qty={closeq:.8g} entry={pos.entry:.8g} exit={px:.8g} "
+               f"fee={close_fee + entry_fee_share:.6f} "
+               f"funding={funding_share:.6f} "
+               f"net={pnl - close_fee - entry_fee_share - funding_share:.6f}")
         events.BUS.emit("pnl", {"uid": uid, "symbol": o.symbol, "pnl": pnl})
         if abs(pos.size) < 1e-9:
             pos.size = 0.0
@@ -263,12 +281,41 @@ def _settle_linear(o: Order, cfg, px: float, q: float, fee: float) -> None:  # n
         pos.leverage = lev
         pos.margin += add_margin
         acct.fbalances["USDT"] = acct.ffree("USDT") - add_margin
+        # attribute the opening share of this fill's fee to the position
+        pos.fees_acc += fee * (remq / max(q, 1e-12))
+        if o.strategy and not pos.strategy:
+            pos.strategy = o.strategy[:40]
         # Entry-attached TP/SL (Bybit tpslMode=Full equivalent)
         if o.tp_price and (pos.tp is None or o.tp_price != pos.tp):
             pos.tp = o.tp_price
         if o.sl_price and (pos.sl is None or o.sl_price != pos.sl):
             pos.sl = o.sl_price
     _persist_position(uid, o.symbol)
+
+
+def _record_closed_trade(o: Order, side: str, entry: float, exit_px: float,
+                         qty: float, gross: float, fees: float,
+                         funding: float, opened_ms: int, partial: bool,
+                         strategy: str) -> None:
+    """Persist one structured (partial) close row — the bot-debugging report."""
+    if o.uid <= 0:
+        return
+    row = dict(
+        uid=o.uid, symbol=o.symbol, side=side, qty=qty, entry=entry,
+        exit=exit_px, gross_pnl=gross, fees=fees, funding=funding,
+        net_pnl=gross - fees - funding,
+        hold_seconds=max(0.0, (util.now_ms() - opened_ms) / 1000.0),
+        close_reason=(o.close_reason or "manual")[:24],
+        strategy=(strategy or "")[:40], partial=1 if partial else 0,
+        ts_ms=util.now_ms(),
+    )
+    events.BUS.emit("persist", lambda s: _write_closed_trade(s, row))
+    events.BUS.emit("trade_closed", {"uid": o.uid, "row": row})
+
+
+async def _write_closed_trade(session, row: dict) -> None:
+    from .. import db
+    await session.execute(db.t_closed_trades.insert().values(**row))
 
 
 # --------------------------------------------------------------------------- #

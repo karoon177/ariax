@@ -451,3 +451,46 @@ def test_dual_wallet_auto_bridge_and_ui_transfer(client):
     bad = client.post("/api/transfer", headers=h,
                       json={"from": "futures", "to": "spot", "amount": 10**9})
     assert not bad.json()["ok"]
+
+
+# --------------------------------------------------------------------------- #
+# v2.2: structured trade report (bot debugging)                                #
+# --------------------------------------------------------------------------- #
+def test_trade_report_structured(client):
+    token, _ = _register(client, "report@example.com")
+    h = {"Authorization": f"Bearer {token}"}
+    key, secret = _make_key(client, token)
+    # open a tagged long that crosses MM liquidity
+    ob = client.get("/v5/market/orderbook",
+                    params={"category": "linear", "symbol": "BTCUSDT",
+                            "limit": 1}).json()
+    ask = float(ob["result"]["a"][0][0])
+    r = client.post("/api/order", headers=h, json={
+        "symbol": "BTCUSD", "side": "buy", "type": "market",
+        "qty": 0.002, "lev": 5, "strategy": "apb-ema_cross"})
+    assert r.json()["ok"], r.text
+    # arm a stop-loss just below mark → risk loop closes it with reason
+    mark = client.get("/v5/market/tickers",
+                      params={"category": "linear", "symbol": "BTCUSDT"}
+                      ).json()["result"]["list"][0]
+    sl = float(mark["markPrice"]) * 0.999
+    t = client.post("/api/tpsl", headers=h, json={"symbol": "BTCUSD",
+                                                  "sl": sl})
+    assert t.json()["ok"], t.text
+    import time as _t
+    _t.sleep(1.5)   # let the 250ms risk loop fire the StopLoss
+    rep = client.get("/api/trade-report", headers=h).json()
+    assert rep["ok"]
+    row = next((r for r in rep["data"] if r["symbol"] == "BTCUSD"), None)
+    assert row is not None, rep["data"]
+    for field in ("entry", "exit", "qty", "fees", "funding", "net",
+                  "hold_min", "reason", "strategy"):
+        assert field in row
+    assert row["reason"] == "StopLoss"
+    assert row["strategy"] == "apb-ema_cross"
+    assert row["side"] == "long"
+    assert row["entry"] > 0 and row["exit"] > 0
+    s = rep["summary"]
+    assert s["trades"] >= 1 and "winrate" in s and "funding" in s
+    assert "by_reason" in s and "StopLoss" in s["by_reason"]
+    assert "by_symbol" in s and "BTCUSD" in s["by_symbol"]

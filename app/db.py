@@ -146,6 +146,26 @@ t_ledger = sa.Table(
     sa.Column("ts_ms", sa.BigInteger, nullable=False),
 )
 
+t_closed_trades = sa.Table(
+    "closed_trades", meta,
+    sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+    sa.Column("uid", sa.Integer, nullable=False),
+    sa.Column("symbol", sa.Text, nullable=False),
+    sa.Column("side", sa.Text, nullable=False),          # long | short
+    sa.Column("qty", sa.Float, nullable=False),
+    sa.Column("entry", sa.Float, nullable=False),
+    sa.Column("exit", sa.Float, nullable=False),
+    sa.Column("gross_pnl", sa.Float, nullable=False),
+    sa.Column("fees", sa.Float, nullable=False),
+    sa.Column("funding", sa.Float, nullable=False),
+    sa.Column("net_pnl", sa.Float, nullable=False),
+    sa.Column("hold_seconds", sa.Float, nullable=False, default=0.0),
+    sa.Column("close_reason", sa.Text, nullable=False, default=""),
+    sa.Column("strategy", sa.Text, nullable=False, default=""),
+    sa.Column("partial", sa.Integer, nullable=False, default=0),
+    sa.Column("ts_ms", sa.BigInteger, nullable=False),
+)
+
 t_funding = sa.Table(
     "funding_history", meta,
     sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
