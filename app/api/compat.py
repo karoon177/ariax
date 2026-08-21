@@ -50,6 +50,7 @@ INTERVAL_MAP = {"1m": "1", "5m": "5", "15m": "15", "1h": "60", "4h": "240"}
 # --------------------------------------------------------------------------- #
 @router.get("/markets")
 async def markets():
+    from .. import runtime
     from ..api.serializers import ticker_legacy
     ref = dict(STATE.reference)
     ref["prices"] = len(ref.get("prices", {}))
@@ -58,7 +59,8 @@ async def markets():
     return {"ok": True,
             "data": {s: ticker_legacy(s, STATE.tick(s))
                      for s in config.MARKETS},
-            "reference": ref}
+            "reference": ref,
+            "db": runtime.db_info()}
 
 
 @router.get("/config")

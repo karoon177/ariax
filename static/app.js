@@ -561,6 +561,13 @@ async function loadSymbolData() {
   if (t.ok) { S.trades = t.data; renderTrades(); }
   const tkr = await api('/api/markets');
   if (tkr.ok) { S.tickers = tkr.data; renderSymBar(); renderTickerStrip(); }
+  if (tkr.db) {
+    const b = $('#db-badge');
+    if (b) {
+      b.textContent = '🗄 دیتابیس: ' + tkr.db.label + (tkr.db.persistent ? ' ✓' : ' ⚠️');
+      b.style.color = tkr.db.persistent ? '#16a34a' : '#ef4444';
+    }
+  }
   if (!parseFloat($('#of-price').value) && S.tickers[S.symbol]) $('#of-price').value = S.tickers[S.symbol].last;
   setSideUI(); updateAvail();
 }

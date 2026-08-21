@@ -29,3 +29,14 @@ def get_db() -> Database:
 
 def get_persister() -> Persister:
     return _PERSISTER
+
+
+def db_info() -> dict:
+    """Visible database status so users can verify persistence at a glance."""
+    from . import config
+    url = config.DATABASE_URL
+    if url.startswith("postgres"):
+        return {"engine": "postgresql", "persistent": True,
+                "label": "PostgreSQL (پایدار)"}
+    return {"engine": "sqlite", "persistent": False,
+            "label": "SQLite (دیسک موقت!)"}

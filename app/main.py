@@ -323,7 +323,22 @@ def create_app() -> FastAPI:
     # ---- health & static --------------------------------------------------- #
     @app.get("/healthz")
     async def healthz():
-        return {"ok": True, "time": util.now_ms()}
+        from . import runtime
+        info = runtime.db_info()
+        users = 0
+        database = runtime.get_db()
+        if database:
+            try:
+                from sqlalchemy import func, select
+                async with database.session() as sess:
+                    users = (await sess.execute(
+                        select(func.count()).select_from(dbm.t_users))
+                    ).scalar() or 0
+                info["ok"] = True
+            except Exception:
+                info["ok"] = False
+        return {"ok": True, "db": info, "users": users,
+                "time": util.now_ms()}
 
     static_dir = Path(__file__).resolve().parent.parent / "static"
 
