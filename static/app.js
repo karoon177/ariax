@@ -371,8 +371,12 @@ let ASSET_LIST = ['USDT', 'BTC', 'ETH', 'SOL', 'XRP', 'DOGE'];
 
 function renderMarkets() {
   const tb = $('#tbl-markets tbody');
-  tb.innerHTML = Object.entries(S.tickers).map(([s, t]) =>
-    `<tr onclick="selectSymbol('${s}')"><td><b>${s}</b></td><td>${t.kind === 'perp' ? 'فیوچرز' : 'اسپات'}</td><td class="num">${pfmt(s, t.last)}</td><td class="num ${t.chg >= 0 ? 'g' : 'r'}">${t.chg >= 0 ? '+' : ''}${t.chg}%</td><td class="num">${pfmt(s, t.high)}</td><td class="num">${pfmt(s, t.low)}</td><td class="num">$${fmt(t.vol, 0)}</td><td><span style="color:var(--blue)">معامله ←</span></td></tr>`).join('');
+  tb.innerHTML = Object.entries(S.tickers).map(([s, t]) => {
+    const fund = t.kind === 'perp'
+      ? `<td class="num ${t.funding >= 0 ? 'r' : 'g'}" style="font-size:.78rem">${t.funding >= 0 ? '+' : ''}${fmt(t.funding, 3)}%</td>`
+      : '<td style="color:var(--mut)">—</td>';
+    return `<tr onclick="selectSymbol('${s}')"><td><b>${s}</b></td><td>${t.kind === 'perp' ? 'فیوچرز' : 'اسپات'}</td><td class="num">${pfmt(s, t.last)}</td><td class="num ${t.chg >= 0 ? 'g' : 'r'}">${t.chg >= 0 ? '+' : ''}${t.chg}%</td><td class="num">${pfmt(s, t.high)}</td><td class="num">${pfmt(s, t.low)}</td><td class="num">$${fmt(t.vol, 0)}</td>${fund}<td><span style="color:var(--blue)">معامله ←</span></td></tr>`;
+  }).join('');
 }
 
 /* ---------------- wallet ---------------- */
@@ -731,6 +735,7 @@ async function loadTradeReport() {
     chip('فاندینگ', fmt(s.funding, 4) + '$', (s.funding <= 0 ? 'r' : 'g')) +
     chip('میانگین نگهداری', (s.avg_hold_min || 0) + 'د') +
     chip('بدترین', fmt(s.worst, 3) + '$', 'r') + chip('بهترین', fmt(s.best, 3) + '$', 'g');
+  $('#report-chips').innerHTML += `<button class="mini ghost" onclick="downloadTradesCSV()" style="cursor:pointer">⬇️ دانلود CSV</button>`;
   $('#tbl-report tbody').innerHTML = (r.data || []).map(t => {
     const dt = new Date((t.ts || 0) * 1000).toLocaleString('fa-IR', { hour12: false });
     return `<tr><td class="num" style="font-size:.75rem">${dt}</td><td><b>${t.symbol}</b></td>
@@ -743,3 +748,16 @@ async function loadTradeReport() {
       <td style="font-size:.75rem">${t.strategy || '—'}</td></tr>`;
   }).join('') || '<tr><td colspan="12" style="text-align:center;color:var(--mut)">هنوز معامله بسته‌شده‌ای ندارید</td></tr>';
 }
+
+window.downloadTradesCSV = async () => {
+  const r = await fetch('/api/trade-report?csv=1&limit=300', {
+    headers: { 'Authorization': 'Bearer ' + S.token } });
+  if (!r.ok) return toast('دانلود CSV ناموفق بود', 'err');
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ariax_trades.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('📥 araix_trades.csv دانلود شد', 'ok');
+};

@@ -571,20 +571,43 @@ async def bot(request: Request):
 # v2.2: structured trade report (bot debugging)                                #
 # --------------------------------------------------------------------------- #
 @router.get("/trade-report")
-async def trade_report(request: Request, limit: int = 100):
+async def trade_report(request: Request, limit: int = 100,
+                       symbol: str | None = None,
+                       strategy: str | None = None,
+                       csv: str | None = None):
     """Rich closed-trade report + aggregates: entry/exit, fees, funding,
     hold time, close reason (SL/TP/Trailing/Liquidation/manual) and the
-    bot's strategy tag — everything needed to debug a trading bot."""
+    bot's strategy tag. Optional ?symbol=&strategy= filters and &csv=1
+    export for offline analysis."""
     uid = await _uid(request)
     limit = max(1, min(limit, 300))
     from .. import db
     from sqlalchemy import select
+    from fastapi.responses import Response
     async with get_db().session() as sess:
+        q = select(db.t_closed_trades).where(db.t_closed_trades.c.uid == uid)
+        if symbol:
+            q = q.where(db.t_closed_trades.c.symbol == symbol)
+        if strategy:
+            q = q.where(db.t_closed_trades.c.strategy == strategy)
         res = await sess.execute(
-            select(db.t_closed_trades)
-            .where(db.t_closed_trades.c.uid == uid)
-            .order_by(db.t_closed_trades.c.id.desc()).limit(limit))
+            q.order_by(db.t_closed_trades.c.id.desc()).limit(limit))
         rows = res.mappings().all()
+
+    if csv:
+        import io
+        buf = io.StringIO()
+        buf.write("ts,symbol,side,qty,entry,exit,gross,fees,funding,net,"
+                  "hold_min,reason,strategy,partial\n")
+        for r in rows:
+            buf.write(f"{r['ts_ms'] / 1000.0:.0f},{r['symbol']},{r['side']},"
+                      f"{r['qty']},{r['entry']},{r['exit']},{r['gross_pnl']:.6f},"
+                      f"{r['fees']:.6f},{r['funding']:.6f},{r['net_pnl']:.6f},"
+                      f"{r['hold_seconds'] / 60.0:.1f},{r['close_reason']},"
+                      f"\"{r['strategy']}\",{int(r['partial'])}\n")
+        return Response(content=buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition":
+                                 'attachment; filename="ariax_trades.csv"'})
 
     def grp(rows, key):
         out = {}
