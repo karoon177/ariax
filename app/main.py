@@ -22,6 +22,8 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket
@@ -212,10 +214,40 @@ async def _session_loader(token: str) -> int | None:
             row = (await sess.execute(
                 select(dbm.t_sessions.c.uid)
                 .where(dbm.t_sessions.c.token_hash == users._tok_hash(token))
+                .where(dbm.t_sessions.c.expires_ms > util.now_ms())
             )).first()
             return row[0] if row else None
     except Exception:
         return None
+
+
+async def keepalive_loop() -> None:
+    """Self-ping loop that prevents the free-tier instance from sleeping.
+
+    Render free web services sleep after ~15 minutes without inbound
+    traffic. Pinging our own public /healthz (RENDER_EXTERNAL_URL) every
+    ~4 minutes keeps the instance warm 24/7 (720h/month < 750h free
+    quota). Each ping is also a health probe logged on failure.
+    """
+    import random
+    import httpx
+    url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not url:
+        log.info("keepalive: RENDER_EXTERNAL_URL not set — skipping (local dev)")
+        return
+    STATE.stats["self_pings"] = 0
+    n = 0
+    while True:
+        await asyncio.sleep(240 + random.uniform(0, 60))
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(f"{url}/healthz")
+                n += 1
+                STATE.stats["self_pings"] = n
+                if n % 15 == 1:
+                    log.info("keepalive ping #%d → %s", n, r.status_code)
+        except Exception as exc:
+            log.warning("keepalive ping failed: %s", exc)
 
 
 # --------------------------------------------------------------------------- #
@@ -288,7 +320,8 @@ def create_app() -> FastAPI:
                 (risk_loop(), "risk"),
                 (funding_loop(), "funding"),
                 (agents.bot_loop(), "bot"),
-                (ws_hub.book_delta_pump(), "ws-delta")):
+                (ws_hub.book_delta_pump(), "ws-delta"),
+                (keepalive_loop(), "keepalive")):
             asyncio.get_running_loop().create_task(coro, name=name)
         log.info("AriaX v2 started: %s markets, %s users",
                  len(config.MARKETS), STATE.stats["users"])
@@ -338,6 +371,8 @@ def create_app() -> FastAPI:
             except Exception:
                 info["ok"] = False
         return {"ok": True, "db": info, "users": users,
+                "self_pings": STATE.stats.get("self_pings", 0),
+                "uptime_s": round(time.time() - STATE.stats["start"]),
                 "time": util.now_ms()}
 
     static_dir = Path(__file__).resolve().parent.parent / "static"

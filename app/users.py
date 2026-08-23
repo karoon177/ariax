@@ -18,7 +18,7 @@ from .errors import ApiError, E_PARAM
 from .engine import matching
 from .state import STATE
 
-SESSION_TTL_MS = 30 * 86400 * 1000
+SESSION_TTL_MS = 90 * 86400 * 1000   # 90 days — logins survive long outages
 
 
 # --------------------------------------------------------------------------- #
