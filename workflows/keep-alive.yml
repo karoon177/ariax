@@ -1,0 +1,14 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    # این یعنی هر ۱۰ دقیقه یک بار اجرا می‌شود
+    - cron: '*/10 * * * *'
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send request to Render
+        run: |
+          curl -s https://your-app.onrender.com > /dev/null
