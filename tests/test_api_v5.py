@@ -142,9 +142,14 @@ def test_v5_signed_end_to_end(client):
 
     # place limit buy on linear BTCUSDT (crosses MM quotes)
     for _ in range(30):
+        tk = client.get("/v5/market/tickers",
+                        params={"category": "linear",
+                                "symbol": "BTCUSDT"}).json()
+        mark = float(tk["result"]["list"][0]["markPrice"]) or 50000.0
         r = _signed(client, "POST", "/v5/order/create", key, secret, body={
             "category": "linear", "symbol": "BTCUSDT", "side": "Buy",
-            "orderType": "Limit", "qty": "0.002", "price": "78000",
+            "orderType": "Limit", "qty": "0.002",
+            "price": f"{mark * 0.85:.1f}",
             "timeInForce": "GTC", "orderLinkId": f"py-{int(time.time()*1000)}"})
         if r.json()["retCode"] == 0:
             break
@@ -266,6 +271,12 @@ def test_admin_force_price_and_backtest(client):
                      json={"category": "linear", "symbol": "BTCUSDT",
                            "price": 50000})
     assert ok.json()["retCode"] == 0
+    # place one real order so the engine stats assertion is deterministic
+    h = {"Authorization": f"Bearer {token}"}
+    o = client.post("/api/order", headers=h, json={
+        "symbol": "BTCUSD", "side": "buy", "type": "market",
+        "qty": 0.002, "lev": 5})
+    assert o.json()["ok"], o.text
     stats = client.get("/v5/admin/stats",
                        headers={"X-Admin-Token": "test-admin-token"}).json()
     assert stats["result"]["stats"]["orders"] >= 1
@@ -473,7 +484,7 @@ def test_trade_report_structured(client):
     mark = client.get("/v5/market/tickers",
                       params={"category": "linear", "symbol": "BTCUSDT"}
                       ).json()["result"]["list"][0]
-    sl = float(mark["markPrice"]) * 0.999
+    sl = float(mark["markPrice"]) * 1.001   # long: SL above mark fires now
     t = client.post("/api/tpsl", headers=h, json={"symbol": "BTCUSD",
                                                   "sl": sl})
     assert t.json()["ok"], t.text

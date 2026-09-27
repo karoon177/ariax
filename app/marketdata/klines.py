@@ -30,16 +30,12 @@ _ohlc_cache: dict[tuple, tuple[float, list]] = {}
 _ohlc_lock = asyncio.Lock()
 
 
-async def kraken_ohlc(symbol: str, interval_min: int, limit: int = 500) -> list | None:
-    """Fetch real Kraken OHLC for a spot symbol (None when unavailable)."""
-    cfg = config.MARKETS.get(symbol)
-    pair = cfg.kraken_spot if cfg else None
-    if not pair:
-        pair = config.MARKETS.get(
-            config.PERP_UNDERLYING.get(symbol, "")).kraken_spot if config.PERP_UNDERLYING.get(symbol) else None
+async def kraken_ohlc_pair(pair: str, interval_min: int,
+                           limit: int = 500) -> list | None:
+    """Fetch real Kraken OHLC for an explicit pair id (None on failure)."""
     if not pair:
         return None
-    key = (symbol, interval_min)
+    key = (pair, interval_min)
     now = time.time()
     async with _ohlc_lock:
         cached = _ohlc_cache.get(key)
@@ -62,6 +58,16 @@ async def kraken_ohlc(symbol: str, interval_min: int, limit: int = 500) -> list 
         return data
     except Exception:
         return None
+
+
+async def kraken_ohlc(symbol: str, interval_min: int, limit: int = 500) -> list | None:
+    """Fetch real Kraken OHLC for a spot symbol (None when unavailable)."""
+    cfg = config.MARKETS.get(symbol)
+    pair = cfg.kraken_spot if cfg else None
+    if not pair:
+        pair = config.MARKETS.get(
+            config.PERP_UNDERLYING.get(symbol, "")).kraken_spot if config.PERP_UNDERLYING.get(symbol) else None
+    return await kraken_ohlc_pair(pair or "", interval_min, limit)
 
 
 def fold(candles_1m: list[list], interval_min: int, limit: int) -> list[list]:
@@ -97,12 +103,15 @@ async def get_klines(symbol: str, interval: str, limit: int,
     t = STATE.tick(symbol)
 
     if source == "last":
-        # real Kraken OHLC for spot pairs AND for linear perps via their
-        # spot underlying (mark ≈ spot; keeps long-interval history deep)
-        spot_symbol = symbol if config.MARKETS[symbol].kind == "spot" \
-            else config.PERP_UNDERLYING.get(symbol)
-        if spot_symbol:
-            real = await kraken_ohlc(spot_symbol, n, limit)
+        # deep real history for spot pairs AND for every linear perp via
+        # its own Kraken USDT spot pair (mark ≈ spot)
+        cfg = config.MARKETS[symbol]
+        spot_symbol = symbol if cfg.kind == "spot" else \
+            config.PERP_UNDERLYING.get(symbol, "")
+        pair = cfg.kraken_spot or (config.MARKETS[spot_symbol].kraken_spot
+                                   if spot_symbol in config.MARKETS else "")
+        if pair:
+            real = await kraken_ohlc_pair(pair, n, limit)
             if real:
                 return real[-limit:][::-1], "Kraken", False
 

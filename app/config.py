@@ -105,22 +105,22 @@ _SPOT_SEEDS = [
     ("DOGE/USDT", "DOGE", 0.238, 0.00001, 1.0, 10.0, 12000.0, "XDGUSDT"),
 ]
 _LINEAR_SEEDS = [
-    # symbol, base, price, tick, step, min_qty, qbase, maxlev, tier, kraken fut
-    ("BTCUSD", "BTC", 115265.0, 0.1, 0.0001, 0.0005, 0.35, 100, "A", "PF_XBTUSD"),
-    ("ETHUSD", "ETH", 4311.2, 0.01, 0.001, 0.005, 4.0, 50, "B", "PF_ETHUSD"),
-    ("SOLUSD", "SOL", 186.45, 0.01, 0.01, 0.05, 45.0, 20, "C", "PF_SOLUSD"),
-    ("XRPUSD", "XRP", 1.02, 0.0001, 1.0, 1.0, 800.0, 20, "C", "PF_XRPUSD"),
-    ("DOGEUSD", "DOGE", 0.07, 0.00001, 1.0, 10.0, 8000.0, 20, "C", "PF_DOGEUSD"),
-    ("ADAUSD", "ADA", 0.19, 0.0001, 1.0, 10.0, 4000.0, 20, "C", "PF_ADAUSD"),
-    ("AVAXUSD", "AVAX", 6.45, 0.001, 0.01, 0.1, 80.0, 20, "C", "PF_AVAXUSD"),
-    ("LINKUSD", "LINK", 8.27, 0.001, 0.01, 0.1, 60.0, 20, "C", "PF_LINKUSD"),
-    ("DOTUSD", "DOT", 0.81, 0.0001, 0.1, 1.0, 700.0, 20, "C", "PF_DOTUSD"),
-    ("LTCUSD", "LTC", 45.1, 0.01, 0.01, 0.01, 12.0, 20, "C", "PF_LTCUSD"),
-    ("BCHUSD", "BCH", 212.9, 0.01, 0.001, 0.001, 3.0, 20, "C", "PF_BCHUSD"),
-    ("TRXUSD", "TRX", 0.331, 0.00001, 1.0, 10.0, 3000.0, 20, "C", "PF_TRXUSD"),
-    ("XLMUSD", "XLM", 0.163, 0.0001, 1.0, 10.0, 2000.0, 20, "C", "PF_XLMUSD"),
-    ("AAVEUSD", "AAVE", 89.8, 0.01, 0.001, 0.001, 4.0, 20, "C", "PF_AAVEUSD"),
-    ("UNIUSD", "UNI", 3.96, 0.001, 0.01, 0.01, 70.0, 20, "C", "PF_UNIUSD"),
+    # symbol, base, price, tick, step, min_qty, qbase, maxlev, tier, kraken fut, kraken spot
+    ("BTCUSD", "BTC", 115265.0, 0.1, 0.0001, 0.0005, 0.35, 100, "A", "PF_XBTUSD", "XBTUSDT"),
+    ("ETHUSD", "ETH", 4311.2, 0.01, 0.001, 0.005, 4.0, 50, "B", "PF_ETHUSD", "ETHUSDT"),
+    ("SOLUSD", "SOL", 186.45, 0.01, 0.01, 0.05, 45.0, 20, "C", "PF_SOLUSD", "SOLUSDT"),
+    ("XRPUSD", "XRP", 1.02, 0.0001, 1.0, 1.0, 800.0, 20, "C", "PF_XRPUSD", "XRPUSDT"),
+    ("DOGEUSD", "DOGE", 0.07, 0.00001, 1.0, 10.0, 8000.0, 20, "C", "PF_DOGEUSD", "XDGUSDT"),
+    ("ADAUSD", "ADA", 0.19, 0.0001, 1.0, 10.0, 4000.0, 20, "C", "PF_ADAUSD", "ADAUSDT"),
+    ("AVAXUSD", "AVAX", 6.45, 0.001, 0.01, 0.1, 80.0, 20, "C", "PF_AVAXUSD", "AVAXUSDT"),
+    ("LINKUSD", "LINK", 8.27, 0.001, 0.01, 0.1, 60.0, 20, "C", "PF_LINKUSD", "LINKUSDT"),
+    ("DOTUSD", "DOT", 0.81, 0.0001, 0.1, 1.0, 700.0, 20, "C", "PF_DOTUSD", "DOTUSDT"),
+    ("LTCUSD", "LTC", 45.1, 0.01, 0.01, 0.01, 12.0, 20, "C", "PF_LTCUSD", "LTCUSDT"),
+    ("BCHUSD", "BCH", 212.9, 0.01, 0.001, 0.001, 3.0, 20, "C", "PF_BCHUSD", "BCHUSDT"),
+    ("TRXUSD", "TRX", 0.331, 0.00001, 1.0, 10.0, 3000.0, 20, "C", "PF_TRXUSD", "TRXUSDT"),
+    ("XLMUSD", "XLM", 0.163, 0.0001, 1.0, 10.0, 2000.0, 20, "C", "PF_XLMUSD", "XLMUSDT"),
+    ("AAVEUSD", "AAVE", 89.8, 0.01, 0.001, 0.001, 4.0, 20, "C", "PF_AAVEUSD", "AAVEUSDT"),
+    ("UNIUSD", "UNI", 3.96, 0.001, 0.01, 0.01, 70.0, 20, "C", "PF_UNIUSD", "UNIUSDT"),
 ]
 
 MARKETS: dict[str, MarketCfg] = {}
@@ -130,13 +130,11 @@ for _s, _b, _p, _tk, _st, _mq, _qb, _kp in _SPOT_SEEDS:
         min_qty=_mq, qbase=_qb, max_lev=1, tier_class="-", seed_price=_p,
         kraken_spot=_kp, min_notional=1.0,
     )
-for _s, _b, _p, _tk, _st, _mq, _qb, _ml, _tc, _kf in _LINEAR_SEEDS:
+for _s, _b, _p, _tk, _st, _mq, _qb, _ml, _tc, _kf, _ks in _LINEAR_SEEDS:
     MARKETS[_s] = MarketCfg(
         symbol=_s, kind="linear", base=_b, tick=_tk, qty_step=_st,
         min_qty=_mq, qbase=_qb, max_lev=_ml, tier_class=_tc, seed_price=_p,
-        kraken_fut=_kf, min_notional=5.0,
-        kraken_spot={"BTC": "XBTUSDT", "ETH": "ETHUSDT", "SOL": "SOLUSDT",
-                     "XRP": "XRPUSDT", "DOGE": "XDGUSDT"}.get(_b, ""),
+        kraken_fut=_kf, kraken_spot=_ks, min_notional=5.0,
     )
 
 # Fast lookup tables for the v5 layer.

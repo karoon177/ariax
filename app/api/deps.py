@@ -73,6 +73,10 @@ def _find_key(api_key: str) -> Optional[dict]:
 
 async def verify_v5_signature(request: Request, require: str = "readTrade") -> dict:
     """Full v5 auth; returns the key record. Raises ApiError on failure."""
+    from .. import runtime
+    if runtime.get_db() is None and not STATE.api_keys:
+        raise ApiError(10016, "database unavailable (degraded mode) — "
+                              "retry shortly", http_status=503)
     ip = client_ip(request)
     api_key = request.headers.get("x-bapi-api-key", "")
     ts = request.headers.get("x-bapi-timestamp", "")

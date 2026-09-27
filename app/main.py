@@ -45,6 +45,8 @@ from .ws import hub as ws_hub
 
 log = logging.getLogger("ariax")
 
+_LOOPS_STARTED = False   # guard: background loops must start exactly once
+
 
 # --------------------------------------------------------------------------- #
 # Durable state loader                                                         #
@@ -295,22 +297,89 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup() -> None:
-        database = dbm.Database(config.DATABASE_URL)
-        runtime.set_db(database)
-        await database.create_all()
         orderbook.build_books()
         seed_all()
         agents.init()
-        await load_state(database)
-        persister = dbm.Persister(database)
-        persister.start()
-        runtime.set_persister(persister)
-        # engine 'persist' events -> ordered write-behind queue
-        events.BUS.on("persist", lambda fn: persister.submit(fn))
+
+        async def _db_probe() -> bool:
+            """Cheap raw asyncpg reachability probe (cancellable, 6s cap).
+
+            SQLAlchemy's async connect hangs until the OS TCP timeout when
+            the database host is unroutable/suspended and cannot be
+            interrupted by asyncio.wait_for — so we probe first.
+            """
+            if not config.DATABASE_URL.startswith("postgres"):
+                return True   # sqlite is always reachable
+            import asyncpg
+            dsn = config.DATABASE_URL.replace(
+                "postgresql+asyncpg://", "postgresql://", 1)
+            try:
+                conn = await asyncio.wait_for(
+                    asyncpg.connect(dsn, timeout=6), timeout=8)
+                await conn.close()
+                return True
+            except Exception as exc:
+                log.critical("database unreachable: %s", str(exc)[:120])
+                return False
+
+        async def _init_database() -> bool:
+            """Connect + load state + start persister. False on failure.
+
+            Idempotent: skips re-init when the DB is already wired (also
+            protects against duplicated startup passes).
+            """
+            if STATE.stats.get("db_ok"):
+                return True
+            try:
+                if not await _db_probe():
+                    STATE.stats["db_ok"] = False
+                    return False
+                database = dbm.Database(config.DATABASE_URL)
+                await asyncio.wait_for(database.create_all(), timeout=20)
+                runtime.set_db(database)
+                await load_state(database)
+                persister = dbm.Persister(database)
+                persister.start()
+                runtime.set_persister(persister)
+                events.BUS.on("persist",
+                              lambda fn: persister.submit(fn))
+                STATE.stats["db_ok"] = True
+                return True
+            except Exception as exc:
+                log.critical("database unavailable: %s", exc)
+                STATE.stats["db_ok"] = False
+                return False
+
+        async def db_recovery_loop() -> None:
+            """Self-heal: keep retrying the database while in degraded mode."""
+            while not STATE.stats.get("db_ok"):
+                await asyncio.sleep(60)
+                if await _init_database():
+                    log.warning("database RECOVERED — full service restored")
+                    events.BUS.emit("agent_oversight", {
+                        "msg": "🔄 دیتابیس بازیابی شد؛ سرویس کامل بازگشت"})
+                    return
+
+        # 3 quick attempts, then boot DEGRADED (public endpoints only)
+        ok = False
+        for _ in range(3):
+            ok = await _init_database()
+            if ok:
+                break
+            await asyncio.sleep(8)
+        if not ok:
+            log.critical("DEGRADED MODE: database down — public market data "
+                         "served, auth/trading disabled, retrying every 60s")
+            asyncio.get_running_loop().create_task(
+                db_recovery_loop(), name="db-recovery")
         ws_hub.wire()
         ws_hub.SESSION_LOADER = _session_loader
         import app.api.deps as _deps
         _deps.SESSION_DB_LOADER = _session_loader
+        global _LOOPS_STARTED
+        if _LOOPS_STARTED:
+            return
+        _LOOPS_STARTED = True
         for coro, name in (
                 (feeds.kraken_feed_loop(), "kraken-feed"),
                 (feeds.tape_loop(), "tape"),
@@ -328,6 +397,9 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown() -> None:
+        global _LOOPS_STARTED
+        _LOOPS_STARTED = False   # allow loops to restart on a fresh loop
+        STATE.stats["db_ok"] = False   # force full re-init on next boot
         persister = runtime.get_persister()
         if persister:
             await persister.stop()
@@ -371,6 +443,7 @@ def create_app() -> FastAPI:
             except Exception:
                 info["ok"] = False
         return {"ok": True, "db": info, "users": users,
+                "db_ok": bool(STATE.stats.get("db_ok", True)),
                 "self_pings": STATE.stats.get("self_pings", 0),
                 "uptime_s": round(time.time() - STATE.stats["start"]),
                 "time": util.now_ms()}
