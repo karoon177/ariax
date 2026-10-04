@@ -71,6 +71,8 @@ async def order_create(request: Request):
         sl=_f_or_none(b.get("stopLoss")),
         tpsl_mode=b.get("tpslMode", "Full"),
         order_link_id=b.get("orderLinkId") or None,
+        trailing_percent=b.get("trailingPercent") or b.get("callbackRate"),
+        active_price=b.get("activePrice") or b.get("activationPrice"),
     )
     from ..engine import matching
     return _ok({"orderId": o.order_id, "orderLinkId": o.order_link_id or ""})

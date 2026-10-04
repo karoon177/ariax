@@ -170,6 +170,28 @@ async def recent_trade(request: Request, category: str = Query("linear"),
             "retExtInfo": {}, "time": util.now_ms()}
 
 
+@router.get("/open-interest")
+async def open_interest_endpoint(request: Request,
+                                 category: str = Query("linear"),
+                                 symbol: str | None = Query(None)):
+    """Real open interest aggregated from live positions."""
+    _rate_public(request)
+    from ..api.serializers import open_interest as oi_of
+    syms = _resolve(category, symbol)
+    out = []
+    for s in syms:
+        if config.MARKETS[s].kind != "linear":
+            continue
+        qty, value = oi_of(s)
+        out.append({"symbol": config.MARKETS[s].v5_symbol,
+                    "openInterest": f"{qty:.8g}",
+                    "openInterestValue": f"{value:.2f}",
+                    "timestamp": str(util.now_ms())})
+    return {"retCode": 0, "retMsg": "OK",
+            "result": {"category": category, "list": out},
+            "retExtInfo": {}, "time": util.now_ms()}
+
+
 @router.get("/funding/history")
 async def funding_history(request: Request, category: str = Query("linear"),
                           symbol: str = Query(...),

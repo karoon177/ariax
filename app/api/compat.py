@@ -216,7 +216,9 @@ async def place_order(request: Request):
             price=float(b["price"]) if b.get("price") not in (None, "", 0, "0")
             else None,
             leverage=int(lev) if lev else None,
-            strategy=(b.get("strategy") or "")[:40])
+            strategy=(b.get("strategy") or "")[:40],
+            trailing_percent=b.get("trailingPercent") or b.get("callbackRate"),
+            active_price=b.get("activePrice") or b.get("activationPrice"))
         return {"ok": True, "id": o.id}
     except (ApiError, KeyError, ValueError, TypeError) as exc:
         msg = exc.ret_msg if isinstance(exc, ApiError) else "پارامترهای سفارش نامعتبر است"
