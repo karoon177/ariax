@@ -271,3 +271,92 @@ def test_market_order_slippage_cap():
     # fills only the level inside the cap
     assert o.filled_qty == pytest.approx(0.5)
     assert o.avg_price == pytest.approx(100_000)
+
+
+# --------------------------------------------------------------------------- #
+# v2.5: realism pack — STP, trailing orders, stepped liquidation, OI           #
+# --------------------------------------------------------------------------- #
+def test_self_trade_prevention():
+    """Binance-style STP: a user's market order never fills their own
+    resting order — the maker is expired instead."""
+    STATE.account(1).balances["USDT"] = 1e9
+    STATE.account(1).balances["BTC"] = 1.0
+    maker = orders.place_order(1, "BTC/USDT", "Buy", "Limit", 0.01,
+                               price=95_000)
+    assert maker.id in STATE.open_orders
+    taker = orders.place_order(1, "BTC/USDT", "Sell", "Limit", 0.01,
+                               price=95_000)
+    assert taker.filled_qty == 0                      # no self-fill
+    assert maker.status == "Cancelled"
+    assert "STP" in maker.canceled_reason
+    assert maker.id not in STATE.open_orders
+    # balances untouched (no fill), holds released
+    assert STATE.account(1).available("USDT") == pytest.approx(1e9)
+
+
+def test_trailing_stop_market_order():
+    """Order-level TRAILING_STOP_MARKET: arms, tracks the extreme, and
+    fires a market order after a 1% retrace."""
+    STATE.account(1).fbalances["USDT"] = 1e6
+    o = orders.place_order(1, "BTCUSD", "Buy", "Market", 0.01,
+                           leverage=5, trailing_percent=1.0)
+    assert o.status == "Untriggered" and o.trail_armed
+    t = STATE.tick("BTCUSD")
+    # liquidity for the market child (sell side)
+    orders.place_order(0, "BTCUSD", "Sell", "Limit", 0.01, price=101_000,
+                       is_agent=True)
+    t.last = t.mark = 102_000           # +2% → extreme rises
+    orders.check_triggers()
+    assert o.status == "Untriggered"    # no retrace yet
+    t.last = t.mark = 100_900           # retrace ~1.08% from extreme
+    orders.check_triggers()
+    assert o.status == "Triggered"
+    pos = STATE.position(1, "BTCUSD")
+    assert pos is not None and pos.size == pytest.approx(0.01)
+
+
+def test_stepped_liquidation_partial():
+    """A multi-tier position under breach is REDUCED into a safer tier
+    instead of being fully liquidated (Bybit stepped liquidation)."""
+    from app.engine import risk as riskmod
+    # SOLUSD tier C: (50k,.005)(200k,.01)(800k,.025) — open in tier 2
+    STATE.account(1).fbalances["USDT"] = 1e7
+    orders.place_order(0, "SOLUSD", "Sell", "Limit", 2_000.0,
+                       price=150.0, is_agent=True)
+    orders.place_order(1, "SOLUSD", "Buy", "Limit", 2_000.0, price=150.0,
+                       leverage=5)          # notional 300k, tier 3 (mm 2.5%)
+    pos = STATE.position(1, "SOLUSD")
+    assert pos.tier()[2] == 0.025
+    mm_full = 0.025 * 2_000 * 150
+    # breach: equity (60k + upnl) must fall under 7.5k → drop > 17.5%
+    orders.place_order(0, "SOLUSD", "Buy", "Limit", 1_500.0, price=123.0,
+                       is_agent=True)       # exit liquidity
+    t = STATE.tick("SOLUSD")
+    t.mark = t.last = 123.0                 # -18% → equity ≈ 60k-54k = 6k
+    riskmod.liquidation_check()
+    pos2 = STATE.position(1, "SOLUSD")
+    assert pos2 is not None and 0 < abs(pos2.size) < 2_000, (
+        "stepped liquidation should REDUCE, not fully close")
+    # a deeper collapse finishes the job
+    orders.place_order(0, "SOLUSD", "Buy", "Limit", 2_000.0, price=100.0,
+                       is_agent=True)
+    t.mark = t.last = 100.0
+    riskmod.liquidation_check()
+    assert STATE.position(1, "SOLUSD") is None
+
+
+def test_open_interest_and_ticker_sizes():
+    """OI aggregates live positions; tickers expose bid/ask sizes."""
+    from app.api.serializers import open_interest, ticker_v5
+    STATE.account(1).fbalances["USDT"] = 1e7
+    orders.place_order(0, "SOLUSD", "Sell", "Limit", 500.0, price=150.0,
+                       is_agent=True)
+    orders.place_order(1, "SOLUSD", "Buy", "Limit", 500.0, price=150.0,
+                       leverage=5)
+    orders.place_order(0, "SOLUSD", "Buy", "Limit", 100.0, price=149.0,
+                       is_agent=True)   # a visible bid for the ticker
+    qty, value = open_interest("SOLUSD")
+    assert qty == pytest.approx(500.0) and value == pytest.approx(500 * 150.0)
+    tk = ticker_v5("SOLUSD", STATE.tick("SOLUSD"))
+    assert float(tk["bid1Price"]) > 0 and float(tk["bid1Size"]) >= 0
+    assert float(tk["openInterest"]) == pytest.approx(500.0)

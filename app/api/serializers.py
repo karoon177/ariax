@@ -16,16 +16,35 @@ def _f(value: float, step: float) -> str:
 # --------------------------------------------------------------------------- #
 # Market data                                                                  #
 # --------------------------------------------------------------------------- #
+def rolling_24h(t) -> tuple:
+    """True rolling 24h (high, low, volume, open) from 1m candles."""
+    bars = list(t.candles1m)[-1440:] + ([t.cur] if t.cur else [])
+    if not bars:
+        return t.high24, t.low24, t.vbase24, t.open24 or t.last
+    return (max(b[2] for b in bars), min(b[3] for b in bars),
+            sum(b[5] for b in bars), bars[0][1])
+
+
+def open_interest(symbol: str) -> tuple:
+    """Real open interest from live positions (base qty, USD value)."""
+    qty = sum(abs(p.size) for (u, s), p in STATE.positions.items()
+              if s == symbol and p.size != 0)
+    mark = STATE.tick(symbol).mark or STATE.tick(symbol).last
+    return qty, qty * mark
+
+
 def ticker_v5(symbol: str, t) -> dict:
     cfg = config.MARKETS[symbol]
-    chg = (t.last / t.open24 - 1) if t.open24 else 0.0
+    high24, low24, vbase24, open24 = rolling_24h(t)
+    chg = (t.last / open24 - 1) if open24 else 0.0
+    oi_qty, oi_value = open_interest(symbol)
     out = {
         "symbol": cfg.v5_symbol,
         "lastPrice": _f(t.last, cfg.tick),
-        "highPrice24h": _f(t.high24, cfg.tick),
-        "lowPrice24h": _f(t.low24, cfg.tick),
-        "prevPrice24h": _f(t.open24, cfg.tick),
-        "volume24h": _f(t.vbase24, cfg.qty_step),
+        "highPrice24h": _f(high24, cfg.tick),
+        "lowPrice24h": _f(low24, cfg.tick),
+        "prevPrice24h": _f(open24, cfg.tick),
+        "volume24h": _f(vbase24, cfg.qty_step),
         "turnover24h": f"{t.vquote24:.2f}",
         "price24hPcnt": f"{chg:.4f}",
         "nextFundingTime": str(int(t.next_funding_ms)) if cfg.kind == "linear" else "0",
@@ -36,26 +55,28 @@ def ticker_v5(symbol: str, t) -> dict:
             "indexPrice": _f(t.index, cfg.tick),
             "fundingRate": f"{t.funding_rate:.6f}",
             "prevFundingRate": f"{t.prev_funding_rate:.6f}",
-            "openInterest": _f(sum(o.leaves for o in STATE.open_orders.values()
-                                   if o.symbol == symbol), cfg.qty_step),
-            "openInterestValue": f"{sum(o.leaves * o.price for o in STATE.open_orders.values() if o.symbol == symbol) :.2f}",
+            "openInterest": _f(oi_qty, cfg.qty_step),
+            "openInterestValue": f"{oi_value:.2f}",
             "bid1Price": "", "bid1Size": "", "ask1Price": "", "ask1Size": "",
         })
         from ..engine import orderbook
-        bb = orderbook.book(symbol).best_bid()
-        ba = orderbook.book(symbol).best_ask()
-        if bb:
+        book = orderbook.book(symbol)
+        bb, ba = book.best_bid(), book.best_ask()
+        if bb is not None:
             out["bid1Price"] = _f(bb, cfg.tick)
-        if ba:
+            out["bid1Size"] = _f(book.level_qty(book.bids, bb), cfg.qty_step)
+        if ba is not None:
             out["ask1Price"] = _f(ba, cfg.tick)
+            out["ask1Size"] = _f(book.level_qty(book.asks, ba), cfg.qty_step)
     return out
 
 
 def ticker_legacy(symbol: str, t) -> dict:
-    chg = (t.last / t.open24 - 1) * 100 if t.open24 else 0.0
+    high24, low24, vbase24, open24 = rolling_24h(t)
+    chg = (t.last / open24 - 1) * 100 if open24 else 0.0
     cfg = config.MARKETS[symbol]
     out = dict(last=float(_f(t.last, cfg.tick)), chg=round(chg, 2),
-               high=t.high24, low=t.low24, vol=round(t.vquote24, 0),
+               high=high24, low=low24, vol=round(vbase24 * t.last, 0),
                kind=cfg.kind, mark=float(_f(t.mark, cfg.tick)),
                funding=round(t.funding_rate * 100, 4))
     return out

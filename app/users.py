@@ -83,6 +83,22 @@ async def authenticate(db, email: str, password: str,
     return dict(row)
 
 
+def audit(kind: str, detail: str = "", ip: str = "") -> None:
+    """Append a security/audit event (write-behind, never blocks trading)."""
+    from . import db as _db
+    from . import util as _util
+
+    async def _write(session) -> None:
+        await session.execute(_db.t_security.insert().values(
+            kind=kind[:32], detail=detail[:200], ip=ip[:64],
+            ts_ms=_util.now_ms()))
+
+    from .runtime import get_persister
+    p = get_persister()
+    if p:
+        p.submit(_write)
+
+
 def new_session_token() -> str:
     import secrets
     return secrets.token_hex(24)

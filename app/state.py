@@ -63,6 +63,11 @@ class Order:
     cum_fee: float = 0.0
     close_reason: str = ""       # why this closing order exists (TP/SL/Liq/…)
     strategy: str = ""           # bot tag persisted onto the position
+    # ---- order-level trailing stop (Binance TRAILING_STOP_MARKET) ----
+    callback_rate: float = 0.0   # retrace % that fires the market order
+    active_price: float = 0.0    # arm threshold (0 = armed immediately)
+    trail_armed: bool = False
+    trail_extreme: float = 0.0   # best price since armed
 
     @property
     def is_conditional(self) -> bool:

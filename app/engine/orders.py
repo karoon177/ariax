@@ -56,6 +56,8 @@ def place_order(
     is_agent: bool = False,
     strategy: str = "",
     close_reason: str = "",
+    trailing_percent: float | None = None,
+    active_price: float | None = None,
 ) -> Order:
     """Validate and submit an order. Raises ApiError on rejection."""
     cfg = config.MARKETS.get(symbol)
@@ -152,6 +154,8 @@ def place_order(
         order_id=util.gen_hex(16) if uid > 0 else f"agent-{STATE.order_seq}",
         status="Created", created_ms=ts, updated_ms=ts, is_agent=is_agent,
         strategy=(strategy or "")[:40], close_reason=(close_reason or "")[:24],
+        callback_rate=float(trailing_percent or 0.0),
+        active_price=float(active_price or 0.0),
     )
     if order_type == "Market":
         o.mkt_cap = est_price if uid > 0 else float("inf")
@@ -161,6 +165,21 @@ def place_order(
     if uid > 0:
         STATE.orders_by_link[(uid, order_link_id)] = o.id
     STATE.stats["orders"] += 1
+
+    # ---- trailing-stop market order (Binance TRAILING_STOP_MARKET) ------ #
+    if trailing_percent:
+        if not 0.1 <= float(trailing_percent) <= 10.0:
+            raise ApiError(E_PARAM, "trailingPercent must be within 0.1..10")
+        o.callback_rate = float(trailing_percent)
+        o.active_price = float(active_price or 0.0)
+        o.status = "Untriggered"
+        o.trail_armed = o.active_price <= 0
+        o.trail_extreme = ref_price
+        STATE.conditional[o.id] = o
+        if uid > 0:
+            _persist_new_order(o)
+            events.BUS.emit("order", {"uid": uid, "order": matching.order_snapshot(o)})
+        return o
 
     # ---- conditional arm-and-wait ---------------------------------------- #
     if trigger_price is not None:
@@ -462,6 +481,31 @@ def trigger_ref(symbol: str, source: str) -> float:
 def check_triggers() -> None:
     """Arm/execute conditional orders and positional TP/SL + trailing."""
     for o in list(STATE.conditional.values()):
+        # ── order-level trailing stops (TRAILING_STOP_MARKET) ──
+        if o.callback_rate > 0:
+            ref = STATE.tick(o.symbol).last or STATE.tick(o.symbol).mark
+            if ref <= 0:
+                continue
+            if not o.trail_armed:
+                armed = ((o.side == "Buy" and ref >= o.active_price) or
+                         (o.side == "Sell" and ref <= o.active_price))
+                if not armed:
+                    continue
+                o.trail_armed = True
+                o.trail_extreme = ref
+                o.updated_ms = util.now_ms()
+            o.trail_extreme = (max(o.trail_extreme, ref) if o.side == "Buy"
+                               else min(o.trail_extreme, ref))
+            retrace = (o.trail_extreme - ref) if o.side == "Buy" \
+                else (ref - o.trail_extreme)
+            if retrace >= o.trail_extreme * o.callback_rate / 100.0:
+                STATE.conditional.pop(o.id, None)
+                o.status = "Triggered"
+                o.updated_ms = util.now_ms()
+                _spawn_child(o)
+                events.BUS.emit("order",
+                                {"uid": o.uid, "order": matching.order_snapshot(o)})
+            continue
         ref = trigger_ref(o.symbol, o.trigger_by)
         if ref <= 0:
             continue
@@ -510,9 +554,11 @@ def _spawn_child(parent: Order) -> Order | None:
         child.id = STATE.order_seq
         child.order_id = util.gen_hex(16)
         child.created_ms = child.updated_ms = util.now_ms()
-        ref = trigger_ref(parent.symbol, parent.trigger_by)
+        ref = trigger_ref(parent.symbol, parent.trigger_by) or \
+            STATE.tick(parent.symbol).last
         child.est_price = ref
-        child.mkt_cap = ref * (1.05 if child.side == "Buy" else 0.95)
+        # Binance-style price protection for triggered orders (±2%)
+        child.mkt_cap = ref * (1.02 if child.side == "Buy" else 0.98)
         _reserve(child)
         _persist_new_order(child)
         matching.execute(child)

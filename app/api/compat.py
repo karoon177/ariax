@@ -153,10 +153,14 @@ async def auth_login(request: Request):
         return {"ok": False, "need_otp": True,
                 "error": "کد تأیید دومرحله‌ای (2FA) لازم است یا نامعتبر است"}
     if not row:
+        users.audit("login_failed", f"email={email[:60]}",
+                    request.client.host if request.client else "")
         return _err("ایمیل یا رمز عبور اشتباه است")
     token = users.new_session_token()
     users.cache_session(token, row["id"])
     get_persister().submit(users.session_persist_fn(token, row["id"]))
+    users.audit("login_ok", f"uid={row['id']}",
+                request.client.host if request.client else "")
     return {"ok": True, "token": token, "uid": row["id"]}
 
 
@@ -492,6 +496,8 @@ async def api_keys_create(request: Request):
     rec = await users.create_api_key(get_db(), uid,
                                      b.get("label") or "Trading bot",
                                      perms, b.get("ips") or "")
+    users.audit("api_key_created", f"uid={uid} label={rec['label']}",
+                request.client.host if request.client else "")
     return {"ok": True, "key": rec["key"], "secret": rec["secret"],
             "permissions": rec["permissions"],
             "warning": "Secret فقط همین بار نمایش داده می‌شود؛ فقط Testnet"}

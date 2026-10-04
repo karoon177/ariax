@@ -379,6 +379,19 @@ def execute(o: Order) -> Order:
         dq = opp[bp]
         while dq and o.leaves > EPS:
             maker = dq[0]
+            # Binance-style Self-Trade Prevention: expire the maker when
+            # the taker belongs to the same account, then keep matching.
+            if o.uid > 0 and maker.uid == o.uid:
+                dq.popleft()
+                maker.status = "Cancelled"
+                maker.canceled_reason = "STP (self-trade prevention)"
+                maker.updated_ms = util.now_ms()
+                STATE.open_orders.pop(maker.id, None)
+                release_est_hold(maker, maker.leaves)
+                events.BUS.emit("order", {"uid": maker.uid,
+                                          "order": order_snapshot(maker)})
+                _persist_order(maker)
+                continue
             q = min(o.leaves, maker.leaves)
             apply_fill(o, maker, bp, q)
             if maker.leaves <= EPS:

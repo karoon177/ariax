@@ -48,6 +48,25 @@ def liquidation_check() -> None:
         _execute_liquidation(uid, symbol, pos, mark, size, risk)
 
 
+def _liquidation_target(pos, equity: float) -> float:
+    """Fraction of the position to close (Bybit-style stepped liquidation).
+
+    Closing part of a position at mark keeps equity ~constant while the
+    maintenance requirement scales with (tier, notional) — so we search
+    tier boundaries for the largest notional whose MM fits the equity.
+    Returns 1.0 when even the smallest tier fails (full liquidation).
+    """
+    cfg = config.MARKETS[pos.symbol]
+    notional = abs(pos.size) * pos.entry
+    for max_notional, _lev, mmr in config.tiers_for(cfg):
+        target_notional = min(notional, max_notional)
+        if equity >= mmr * target_notional * 1.10:
+            if target_notional >= notional - 1e-9:
+                return 0.0            # already safe at current tier
+            return 1.0 - target_notional / notional
+    return 1.0
+
+
 def _execute_liquidation(uid: int, symbol: str, pos, mark: float,
                          size: float, risk: dict) -> None:
     # 1) cancel user's resting orders on this symbol to free margin
@@ -58,17 +77,37 @@ def _execute_liquidation(uid: int, symbol: str, pos, mark: float,
         except Exception:
             pass
 
-    # 2) force close at market (reduce-only)
+    # 2) stepped liquidation (Bybit/Binance style): close only the
+    #    fraction needed to drop into a safe risk tier; full close only
+    #    when no tier can hold the remaining equity.
     side = "Sell" if pos.size > 0 else "Buy"
     entry = pos.entry
     closed = False
+    fraction = _liquidation_target(pos, risk["equity"])
+    if fraction <= 0.0:
+        return                            # race: recovered above MM
+    close_qty = max(pos and abs(pos.size) * fraction, 0.0)
+    if fraction >= 0.999:
+        close_qty = abs(pos.size)
     try:
-        o = orders.place_order(uid, symbol, side, "Market", size,
+        o = orders.place_order(uid, symbol, side, "Market", close_qty,
                                reduce_only=True, close_on_trigger=True,
                                leverage=pos.leverage,
                                close_reason="Liquidation",
                                strategy=pos.strategy)
         closed = o.status == "Filled"
+        # re-check: if still under maintenance, finish the position
+        pos2 = STATE.position(uid, symbol)
+        if pos2 and pos2.size != 0:
+            r2 = position_risk(pos2)
+            if r2["equity"] <= r2["mm"]:
+                o2 = orders.place_order(uid, symbol, side, "Market",
+                                        abs(pos2.size), reduce_only=True,
+                                        close_on_trigger=True,
+                                        leverage=pos2.leverage,
+                                        close_reason="Liquidation",
+                                        strategy=pos2.strategy)
+                closed = closed or o2.status == "Filled"
     except Exception as exc:  # no liquidity left: settle at bankruptcy
         agent_log(f"Liquidation fallback settle for #{uid} {symbol}: {exc}")
         _bankruptcy_settle(uid, symbol, pos, mark)
@@ -85,6 +124,12 @@ def _execute_liquidation(uid: int, symbol: str, pos, mark: float,
         matching.persist_all_user_state(uid)
     liq_fee = config.LIQUIDATION_FEE_RATE * size * mark
     STATE.insurance_pool += liq_fee
+    if STATE.insurance_pool < 0:
+        # Auto-Deleveraging (simplified): the insurance fund cannot cover
+        # the bankruptcy — record it and reset the fund to zero.
+        agent_log(f"⚠️ ADL event: insurance shortfall "
+                  f"{-STATE.insurance_pool:,.2f} USDT on {symbol}")
+        STATE.insurance_pool = 0.0
     events.BUS.emit("persist", lambda s: _write_meta(
         s, "insurance_pool", str(STATE.insurance_pool)))
     STATE.stats["liqs"] += 1
