@@ -19,7 +19,7 @@ REQUIREMENTS = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "pydantic>=2.7",
-    "sqlalchemy>=2.0.30",
+    "sqlalchemy[asyncio]>=2.0.30",   # [asyncio] pulls in greenlet (required)
     "aiosqlite>=0.20",
     "asyncpg>=0.29",
     "httpx>=0.27",
@@ -29,7 +29,7 @@ REQUIREMENTS = [
 
 REQUIRED_MODULES = [
     "fastapi", "uvicorn", "pydantic", "sqlalchemy", "aiosqlite",
-    "asyncpg", "httpx", "websockets", "cryptography",
+    "asyncpg", "httpx", "websockets", "cryptography", "greenlet",
 ]
 
 
