@@ -1,63 +1,63 @@
 {
  "meta": {
-  "started": "2026-10-06T16:45:14.075046+00:00",
+  "started": "2026-10-06T16:51:12.939465+00:00",
   "reference_exchange": "OKX"
  },
  "auditors": {
   "prices": {
    "per_symbol": {
     "BTCUSD": {
-     "avg_pct": 0.045,
-     "max_pct": 0.055
+     "avg_pct": 0.0427,
+     "max_pct": 0.0595
     },
     "ETHUSD": {
-     "avg_pct": 0.035,
-     "max_pct": 0.0411
+     "avg_pct": 0.0293,
+     "max_pct": 0.0334
     },
     "SOLUSD": {
-     "avg_pct": 0.047,
-     "max_pct": 0.0581
+     "avg_pct": 0.0498,
+     "max_pct": 0.0582
     },
     "XRPUSD": {
-     "avg_pct": 0.0522,
-     "max_pct": 0.0599
+     "avg_pct": 0.0466,
+     "max_pct": 0.0532
     },
     "DOGEUSD": {
-     "avg_pct": 0.049,
-     "max_pct": 0.063
+     "avg_pct": 0.042,
+     "max_pct": 0.0525
     },
     "ADAUSD": {
-     "avg_pct": 0.0551,
-     "max_pct": 0.0735
+     "avg_pct": 0.0368,
+     "max_pct": 0.0736
     },
     "LINKUSD": {
-     "avg_pct": 0.0659,
-     "max_pct": 0.0863
+     "avg_pct": 0.066,
+     "max_pct": 0.072
     },
     "AVAXUSD": {
-     "avg_pct": 0.0858,
-     "max_pct": 0.1309
+     "avg_pct": 0.0859,
+     "max_pct": 0.1049
     },
     "DOTUSD": {
-     "avg_pct": 0.1218,
-     "max_pct": 0.1412
+     "avg_pct": 0.1149,
+     "max_pct": 0.1828
     },
     "LTCUSD": {
-     "avg_pct": 0.0765,
-     "max_pct": 0.0861
+     "avg_pct": 0.0767,
+     "max_pct": 0.1007
     },
     "BCHUSD": {
-     "avg_pct": 0.1158,
-     "max_pct": 0.1243
+     "avg_pct": 0.1356,
+     "max_pct": 0.1468
     },
     "TRXUSD": {
-     "avg_pct": 0.0679,
+     "avg_pct": 0.0664,
      "max_pct": 0.0684
     }
    },
-   "overall_avg_pct": 0.0681,
-   "overall_max_pct": 0.1412,
-   "score": 86.4
+   "overall_avg_pct": 0.0661,
+   "overall_max_pct": 0.1828,
+   "score": 86.8
   },
   "fees": {
    "rows": [
@@ -97,147 +97,147 @@
     "min_qty_rejected": true
    },
    "score": 100.0,
-   "liq_dev_pct": 0.0002
+   "liq_dev_pct": 0.0
   },
   "microstructure": {
    "per_symbol": {
     "BTCUSD": {
-     "aria_spread_pct": 0.0007,
+     "aria_spread_pct": 0.0009,
      "okx_spread_pct": 0.0001,
-     "aria_top10_depth_usd": 139643,
-     "okx_top10_depth_usd": 198033877
+     "aria_top10_depth_usd": 143592,
+     "okx_top10_depth_usd": 188682060
     },
     "ETHUSD": {
-     "aria_spread_pct": 0.003,
+     "aria_spread_pct": 0.0022,
      "okx_spread_pct": 0.0004,
-     "aria_top10_depth_usd": 50345,
-     "okx_top10_depth_usd": 19583514
+     "aria_top10_depth_usd": 65381,
+     "okx_top10_depth_usd": 22878171
     },
     "SOLUSD": {
-     "aria_spread_pct": 0.0332,
+     "aria_spread_pct": 0.0415,
      "okx_spread_pct": 0.0083,
-     "aria_top10_depth_usd": 22438,
-     "okx_top10_depth_usd": 2975587
+     "aria_top10_depth_usd": 27003,
+     "okx_top10_depth_usd": 3422535
     },
     "XRPUSD": {
-     "aria_spread_pct": 0.04,
-     "okx_spread_pct": 0.0067,
-     "aria_top10_depth_usd": 6332,
-     "okx_top10_depth_usd": 15281
+     "aria_spread_pct": 0.0332,
+     "okx_spread_pct": 0.0066,
+     "aria_top10_depth_usd": 6369,
+     "okx_top10_depth_usd": 18174
     },
     "DOGEUSD": {
-     "aria_spread_pct": 0.0525,
+     "aria_spread_pct": 0.0629,
      "okx_spread_pct": 0.0105,
-     "aria_top10_depth_usd": 4806,
-     "okx_top10_depth_usd": 1155
+     "aria_top10_depth_usd": 3850,
+     "okx_top10_depth_usd": 1098
     },
     "ADAUSD": {
-     "aria_spread_pct": 0.2205,
-     "okx_spread_pct": 0.0367,
-     "aria_top10_depth_usd": 4517,
-     "okx_top10_depth_usd": 17689
+     "aria_spread_pct": 0.2573,
+     "okx_spread_pct": 0.0368,
+     "aria_top10_depth_usd": 7399,
+     "okx_top10_depth_usd": 18648
     }
    },
-   "spread_score": 17.9,
+   "spread_score": 15.8,
    "depth_score": 0.1,
-   "score": 10.8
+   "score": 9.5
   },
   "funding": {
    "per_symbol": {
     "BTCUSD": {
-     "aria": -0.0066,
+     "aria": 0.0164,
      "okx": 0.003
     },
     "ETHUSD": {
-     "aria": -0.0193,
-     "okx": 0.0031
+     "aria": 0.0077,
+     "okx": 0.0034
     },
     "SOLUSD": {
-     "aria": -0.0218,
-     "okx": 0.0019
+     "aria": 0.0149,
+     "okx": 0.0017
     },
     "XRPUSD": {
-     "aria": 0.0488,
+     "aria": 0.0649,
      "okx": 0.01
     },
     "DOGEUSD": {
-     "aria": 0.0081,
+     "aria": 0.0765,
      "okx": 0.01
     },
     "ADAUSD": {
-     "aria": 0.75,
+     "aria": 0.1154,
      "okx": 0.01
     },
     "LINKUSD": {
-     "aria": 0.75,
-     "okx": 0.0028
+     "aria": 0.0316,
+     "okx": 0.0026
     },
     "AVAXUSD": {
-     "aria": 0.75,
-     "okx": 0.0081
+     "aria": 0.1352,
+     "okx": 0.0074
     }
    },
-   "sign_agreement_pct": 62.5,
-   "score": 62.5
+   "sign_agreement_pct": 100.0,
+   "score": 100
   },
   "bot_parity": {
    "per_symbol": {
     "BTCUSD": {
      "common_bars": 300,
      "signal_agreement_pct": 96.67,
-     "pnl_aria_pct": -1.374,
-     "pnl_okx_pct": 0.047,
-     "pnl_abs_dev_pp": 1.421
+     "pnl_aria_pct": -1.354,
+     "pnl_okx_pct": 0.107,
+     "pnl_abs_dev_pp": 1.461
     },
     "ETHUSD": {
      "common_bars": 300,
      "signal_agreement_pct": 97.5,
-     "pnl_aria_pct": -1.848,
-     "pnl_okx_pct": -2.473,
-     "pnl_abs_dev_pp": 0.626
+     "pnl_aria_pct": -1.799,
+     "pnl_okx_pct": -2.416,
+     "pnl_abs_dev_pp": 0.617
     },
     "SOLUSD": {
      "common_bars": 300,
      "signal_agreement_pct": 98.75,
-     "pnl_aria_pct": -2.383,
-     "pnl_okx_pct": -1.953,
-     "pnl_abs_dev_pp": 0.43
+     "pnl_aria_pct": -2.416,
+     "pnl_okx_pct": -1.994,
+     "pnl_abs_dev_pp": 0.422
     },
     "XRPUSD": {
      "common_bars": 300,
      "signal_agreement_pct": 97.92,
-     "pnl_aria_pct": -2.7,
-     "pnl_okx_pct": -2.731,
-     "pnl_abs_dev_pp": 0.032
+     "pnl_aria_pct": -2.869,
+     "pnl_okx_pct": -2.893,
+     "pnl_abs_dev_pp": 0.025
     },
     "DOGEUSD": {
      "common_bars": 300,
      "signal_agreement_pct": 94.17,
-     "pnl_aria_pct": -1.342,
-     "pnl_okx_pct": -1.15,
-     "pnl_abs_dev_pp": 0.192
+     "pnl_aria_pct": -1.208,
+     "pnl_okx_pct": -1.119,
+     "pnl_abs_dev_pp": 0.089
     },
     "ADAUSD": {
      "common_bars": 300,
      "signal_agreement_pct": 97.92,
-     "pnl_aria_pct": -0.996,
-     "pnl_okx_pct": 0.534,
-     "pnl_abs_dev_pp": 1.53
+     "pnl_aria_pct": -1.021,
+     "pnl_okx_pct": 0.419,
+     "pnl_abs_dev_pp": 1.44
     }
    },
    "avg_signal_agreement": 97.16,
-   "avg_pnl_dev_pp": 0.705,
+   "avg_pnl_dev_pp": 0.676,
    "within_5pct": "6/6",
    "score": 97.3
   },
   "infra": {
-   "p50_ms": 41,
+   "p50_ms": 44,
    "p95_ms": 53,
    "score": 95
   }
  },
  "overall": {
-  "score": 85.2,
+  "score": 87.0,
   "weights": {
    "prices": 0.2,
    "fees": 0.1,
