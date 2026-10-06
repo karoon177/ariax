@@ -38,13 +38,13 @@ async def kraken_feed_loop() -> None:
     EQuery:Unknown asset pair) and a failure on one pair never kills
     the whole cycle. Futures marks are fetched independently.
     """
-    spot_syms = [(s, m.kraken_spot) for s, m in config.MARKETS.items()
-                 if m.kraken_spot and m.kind == "spot"]
+    spot_pairs = sorted({m.kraken_spot for m in config.MARKETS.values()
+                         if m.kraken_spot})
     async with httpx.AsyncClient(timeout=6.0) as client:
         while True:
             try:
-                index_prices: dict[str, float] = {}
-                for sym, pair in spot_syms:
+                pair_prices: dict[str, float] = {}
+                for pair in spot_pairs:
                     try:
                         r = await client.get(SPOT_URL, params={"pair": pair})
                         payload = r.json()
@@ -52,7 +52,7 @@ async def kraken_feed_loop() -> None:
                             row = next(iter(payload["result"].values()))
                             px = float(row["c"][0])
                             if px > 0:
-                                index_prices[sym] = px
+                                pair_prices[pair] = px
                     except Exception:
                         pass
                     await asyncio.sleep(0.15)
@@ -70,14 +70,19 @@ async def kraken_feed_loop() -> None:
                 except Exception:
                     pass
 
-                if not index_prices and not mark_prices:
+                if not pair_prices and not mark_prices:
                     raise RuntimeError("all reference feeds failed")
 
+                sym_prices = dict(mark_prices)
+                for symbol, m in config.MARKETS.items():
+                    if m.kraken_spot and m.kraken_spot in pair_prices:
+                        sym_prices.setdefault(symbol,
+                                              pair_prices[m.kraken_spot])
                 ref = dict(source="Kraken Spot + Kraken Futures", status="live",
                            updated=util.now_ms() / 1000.0, error="",
-                           prices={**index_prices, **mark_prices})
+                           prices=sym_prices)
                 STATE.reference.update(ref)
-                _apply_prices(index_prices, mark_prices)
+                _apply_prices(pair_prices, mark_prices)
                 events.BUS.emit("agent_oracle", {
                     "msg": f"Kraken feed synced — BTC index "
                            f"{index_prices.get('BTC/USDT', 0):,.1f}"})
@@ -89,15 +94,19 @@ async def kraken_feed_loop() -> None:
             await asyncio.sleep(3.0)
 
 
-def _apply_prices(index_prices: dict, mark_prices: dict) -> None:
-    """Route fresh reference prices into market tick state + tape."""
+def _apply_prices(pair_prices: dict, mark_prices: dict) -> None:
+    """Route fresh reference prices into market tick state + tape.
+
+    Every market (spot AND linear) has its own kraken_spot pair, so the
+    index price updates for all 20 symbols — not just the legacy five.
+    """
     for symbol, cfg in config.MARKETS.items():
         t = STATE.tick(symbol)
         override = STATE.force_price.get(symbol)
         if override:
             px = override
         elif cfg.kind == "spot":
-            px = index_prices.get(symbol, t.last)
+            px = pair_prices.get(cfg.kraken_spot, t.last)
         else:
             px = mark_prices.get(symbol, t.mark)
         if not px or px <= 0:
@@ -112,7 +121,7 @@ def _apply_prices(index_prices: dict, mark_prices: dict) -> None:
             t.on_trade_price(px)
         else:
             t.mark = px
-            idx = index_prices.get(config.PERP_UNDERLYING.get(symbol, ""))
+            idx = pair_prices.get(cfg.kraken_spot)
             if idx:
                 t.index = idx
             t.on_trade_price(px)

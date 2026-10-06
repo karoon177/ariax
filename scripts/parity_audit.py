@@ -154,12 +154,21 @@ async def auditor_execution(http):
     # C1: exact taker fee on a real market fill
     tk = await aria_json(http, "/v5/market/tickers?category=linear&symbol=ETHUSDT")
     mark = float(tk["result"]["list"][0]["markPrice"])
-    async with http.post(f"{ARIA}/api/order", headers=h,
-                         json={"symbol": "ETHUSD", "side": "buy",
-                               "type": "market", "qty": 0.02, "lev": 5}) as r:
-        await r.json()
-    fills = await aria_json(http, "/api/fills", headers=h)
-    f0 = fills["data"][0]
+    f0 = None
+    for attempt in range(4):
+        async with http.post(f"{ARIA}/api/order", headers=h,
+                             json={"symbol": "ETHUSD", "side": "buy",
+                                   "type": "market", "qty": 0.02,
+                                   "lev": 5}) as r:
+            od = await r.json()
+        await asyncio.sleep(1.2)
+        fills = await aria_json(http, "/api/fills", headers=h)
+        if fills.get("data"):
+            f0 = fills["data"][0]
+            break
+        await asyncio.sleep(2)
+    if f0 is None:
+        raise RuntimeError(f"no fill after retries (last order resp: {od}")
     fee_rate = f0["fee"] / (f0["price"] * f0["qty"])
     checks["taker_fee_exact"] = abs(fee_rate - 0.00055) < 1e-9
     log(f"  [C1] کارمزد تیکر واقعی: {fee_rate*100:.5f}% "
@@ -232,9 +241,10 @@ async def auditor_microstructure(http):
         o_asks = ob[0]["asks"] if ob else []
         o_spread = (float(o_asks[0][0]) - float(o_bids[0][0])) if o_asks and o_bids else 0
         o_mid = (float(o_asks[0][0]) + float(o_bids[0][0])) / 2 if o_spread else 0
-        a_depth = sum(float(p) * float(q) for p, q in ab["result"]["b"][:10] + ab["result"]["a"][:10])
-        o_depth = sum(float(p) * float(q) for p, q in
-                      (o_bids[:10] + o_asks[:10])) if o_bids else 0
+        a_depth = sum(float(r[0]) * float(r[1])
+                      for r in ab["result"]["b"][:10] + ab["result"]["a"][:10])
+        o_depth = sum(float(r[0]) * float(r[1])
+                      for r in (o_bids[:10] + o_asks[:10])) if o_bids else 0
         sp_a = a_spread / a_mid * 100 if a_mid else 0
         sp_o = o_spread / o_mid * 100 if o_mid else 0
         per[asym] = {"aria_spread_pct": round(sp_a, 4),
