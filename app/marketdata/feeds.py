@@ -21,7 +21,7 @@ import httpx
 from .. import config, events, util
 from ..state import STATE
 
-SPOT_URL = "https://api.kraken.com/0/public/Ticker?pair={pairs}"
+SPOT_URL = "https://api.kraken.com/0/public/Ticker"
 FUT_URL = "https://futures.kraken.com/derivatives/api/v3/tickers"
 COINBASE_URL = "https://api.coinbase.com/v2/prices/BTC-USD/spot"
 
@@ -31,33 +31,47 @@ def kraken_spot_pairs() -> list[str]:
 
 
 async def kraken_feed_loop() -> None:
-    """Poll Kraken spot + futures every 2 s; update index/mark/last."""
-    spot_pairs = kraken_spot_pairs()
+    """Poll Kraken prices every ~3 s; update index/mark.
+
+    Robust fetching: each spot pair is requested individually (a batched
+    comma-joined URL is rejected by Kraken from some regions with
+    EQuery:Unknown asset pair) and a failure on one pair never kills
+    the whole cycle. Futures marks are fetched independently.
+    """
+    spot_syms = [(s, m.kraken_spot) for s, m in config.MARKETS.items()
+                 if m.kraken_spot and m.kind == "spot"]
     async with httpx.AsyncClient(timeout=6.0) as client:
         while True:
             try:
-                spot = await client.get(SPOT_URL.format(pairs=",".join(spot_pairs)))
-                spot.raise_for_status()
-                payload = spot.json()
-                if payload.get("error"):
-                    raise RuntimeError(str(payload["error"]))
-                result = payload.get("result", {})
-                index_prices = {}
-                for symbol, m in config.MARKETS.items():
-                    if m.kraken_spot and m.kraken_spot in result:
-                        row = result[m.kraken_spot]
-                        index_prices[symbol] = float(row["c"][0])
+                index_prices: dict[str, float] = {}
+                for sym, pair in spot_syms:
+                    try:
+                        r = await client.get(SPOT_URL, params={"pair": pair})
+                        payload = r.json()
+                        if not payload.get("error"):
+                            row = next(iter(payload["result"].values()))
+                            px = float(row["c"][0])
+                            if px > 0:
+                                index_prices[sym] = px
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.15)
 
-                fut = await client.get(FUT_URL)
-                fut.raise_for_status()
-                frows = {x.get("symbol"): x for x in fut.json().get("tickers", [])}
-                mark_prices = {}
-                for symbol, m in config.MARKETS.items():
-                    if m.kind == "linear" and m.kraken_fut in frows:
-                        row = frows[m.kraken_fut]
-                        mp = row.get("markPrice")
-                        if mp:
-                            mark_prices[symbol] = float(mp)
+                mark_prices: dict[str, float] = {}
+                try:
+                    fut = await client.get(FUT_URL)
+                    frows = {x.get("symbol"): x
+                             for x in fut.json().get("tickers", [])}
+                    for symbol, m in config.MARKETS.items():
+                        if m.kind == "linear" and m.kraken_fut in frows:
+                            mp = frows[m.kraken_fut].get("markPrice")
+                            if mp:
+                                mark_prices[symbol] = float(mp)
+                except Exception:
+                    pass
+
+                if not index_prices and not mark_prices:
+                    raise RuntimeError("all reference feeds failed")
 
                 ref = dict(source="Kraken Spot + Kraken Futures", status="live",
                            updated=util.now_ms() / 1000.0, error="",
@@ -72,7 +86,7 @@ async def kraken_feed_loop() -> None:
                 events.BUS.emit("agent_watch", {
                     "msg": "Warning: reference feed unavailable; "
                            "last prices held (stale)"})
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(3.0)
 
 
 def _apply_prices(index_prices: dict, mark_prices: dict) -> None:
