@@ -338,6 +338,7 @@ def create_app() -> FastAPI:
                 await asyncio.wait_for(database.create_all(), timeout=20)
                 runtime.set_db(database)
                 await load_state(database)
+                await users.ensure_seed_user(database)
                 persister = dbm.Persister(database)
                 persister.start()
                 runtime.set_persister(persister)

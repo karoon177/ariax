@@ -37,6 +37,21 @@ FUNDING_BASE_RATE = 0.0001    # static interest component (0.01% / 8h)
 DEFAULT_RECV_WINDOW = 5000
 MAX_RECV_WINDOW = 60000
 
+# ---- single-user lock-down mode (temporary) ----
+# DISABLE_REGISTRATION=1 blocks /api/auth/register entirely.
+DISABLE_REGISTRATION = os.environ.get("DISABLE_REGISTRATION", "0") == "1"
+# The one account that always exists (auto-recreated on every boot).
+SEED_USER_EMAIL = os.environ.get("SEED_USER_EMAIL", "karoon177@gmail.com")
+SEED_USER_PASSWORD = os.environ.get("SEED_USER_PASSWORD", "karoon177@gmail.com")
+# FIXED API credentials for the seed user — never change, never need
+# re-creation after redeploys (testnet convenience; safe defaults below
+# can be overridden via env).
+SEED_API_KEY = os.environ.get(
+    "SEED_API_KEY", "arx-karoon177-fixed-9d4e7c1a")
+SEED_API_SECRET = os.environ.get(
+    "SEED_API_SECRET",
+    "Kf9mWx2vQz7RtN4pZb8LhY3jT6sEgUa5cHn1oPzIkM0yBvVXe")
+
 
 # Fee schedule (mirror of Bybit non-VIP defaults for linear; spot kept at
 # AriaX v1 values to avoid surprising existing UI users — see MIGRATION_GUIDE).

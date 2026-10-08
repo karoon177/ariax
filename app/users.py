@@ -99,6 +99,73 @@ def audit(kind: str, detail: str = "", ip: str = "") -> None:
         p.submit(_write)
 
 
+async def ensure_seed_user(db) -> dict | None:
+    """Idempotent: guarantee the single lock-down account + FIXED API key
+    exist (called at every boot and after admin resets). Never recreates
+    what is already there, so credentials never change."""
+    from . import config, security, util
+    from .state import STATE
+    from . import db as _db
+    from sqlalchemy import select
+    if not config.SEED_USER_EMAIL:
+        return None
+    email = config.SEED_USER_EMAIL.strip().lower()
+    key_hash = security.api_key_hash(config.SEED_API_KEY)
+    async with db.session() as sess:
+        row = (await sess.execute(
+            select(_db.t_users)
+            .where(_db.t_users.c.email == email))).mappings().first()
+        if row is None:
+            salt = security.new_salt()
+            pw = security.hash_password(config.SEED_USER_PASSWORD, salt)
+            cur = await sess.execute(_db.t_users.insert().values(
+                email=email, name="Karoon", pass_hash=pw, salt=salt,
+                created_ms=util.now_ms()))
+            uid = cur.inserted_primary_key[0]
+            await sess.execute(_db.t_balances.insert().values(
+                uid=uid, asset="USDT", free=config.SIGNUP_BONUS_USDT))
+            await sess.execute(_db.t_ledger.insert().values(
+                uid=uid, type="bonus", asset="USDT",
+                amount=config.SIGNUP_BONUS_USDT,
+                note="پاداش حساب اصلی (تست‌نت)", ts_ms=util.now_ms()))
+        else:
+            uid = row["id"]
+        krow = (await sess.execute(
+            select(_db.t_api_keys)
+            .where(_db.t_api_keys.c.key_hash == key_hash))).mappings().first()
+        if krow is None:
+            await sess.execute(_db.t_api_keys.insert().values(
+                uid=uid, key_hash=key_hash,
+                key_plain=config.SEED_API_KEY,
+                key_prefix=config.SEED_API_KEY[:10],
+                secret_enc=security.encrypt_secret(config.SEED_API_SECRET),
+                permissions='["readTrade", "trade"]', ips="",
+                label="ثابت اصلی", created_ms=util.now_ms()))
+        elif krow["revoked"] or krow["uid"] != uid:
+            await sess.execute(
+                _db.t_api_keys.update()
+                .where(_db.t_api_keys.c.key_hash == key_hash)
+                .values(revoked=0, uid=uid,
+                        secret_enc=security.encrypt_secret(
+                            config.SEED_API_SECRET),
+                        permissions='["readTrade", "trade"]'))
+        b = (await sess.execute(
+            select(_db.t_balances.c.free)
+            .where((_db.t_balances.c.uid == uid) &
+                   (_db.t_balances.c.asset == "USDT")))).first()
+        await sess.commit()
+    # ---- mirror into in-memory state ----
+    acct = STATE.account(uid)
+    if not acct.balances.get("USDT"):
+        acct.balances["USDT"] = b[0] if b else 0.0
+    STATE.api_keys[key_hash] = dict(
+        id=0, uid=uid, key_hash=key_hash, key=config.SEED_API_KEY,
+        secret=config.SEED_API_SECRET, label="ثابت اصلی",
+        permissions=["readTrade", "trade"], ips="", revoked=False)
+    STATE.stats["users"] = max(STATE.stats.get("users", 0), 1)
+    return {"uid": uid, "email": email, "api_key": config.SEED_API_KEY}
+
+
 def new_session_token() -> str:
     import secrets
     return secrets.token_hex(24)

@@ -505,3 +505,57 @@ def test_trade_report_structured(client):
     assert s["trades"] >= 1 and "winrate" in s and "funding" in s
     assert "by_reason" in s and "StopLoss" in s["by_reason"]
     assert "by_symbol" in s and "BTCUSD" in s["by_symbol"]
+
+
+# --------------------------------------------------------------------------- #
+# v2.6: single-user lock-down (fixed account + fixed API key)                  #
+# --------------------------------------------------------------------------- #
+def test_registration_lockdown(client):
+    from app import config
+    old = config.DISABLE_REGISTRATION
+    config.DISABLE_REGISTRATION = True
+    try:
+        r = client.post("/api/auth/register",
+                        json={"email": "someone@x.io", "password": "pass123"})
+        body = r.json()
+        assert not body["ok"] and "غیرفعال" in body["error"]
+    finally:
+        config.DISABLE_REGISTRATION = old
+
+
+def test_seed_user_fixed_key_idempotent():
+    import asyncio
+    from app import config
+    from app.db import Database
+    from app.users import ensure_seed_user
+    olds = (config.SEED_USER_EMAIL, config.SEED_USER_PASSWORD,
+            config.SEED_API_KEY, config.SEED_API_SECRET)
+    config.SEED_USER_EMAIL = "seedtest@x.io"
+    config.SEED_USER_PASSWORD = "pw-123456"
+    config.SEED_API_KEY = "arx-fixed-test-key"
+    config.SEED_API_SECRET = "fixed-secret-xyz"
+    import os
+    path = "./data/seedtest.db"
+    if os.path.exists(path):
+        os.remove(path)
+    async def run():
+        d = Database("sqlite+aiosqlite:///./data/seedtest.db")
+        await d.create_all()
+        a = await ensure_seed_user(d)
+        b = await ensure_seed_user(d)          # idempotent
+        return a, b
+    try:
+        a, b = asyncio.run(run())
+        assert a["uid"] == b["uid"] and a["api_key"] == "arx-fixed-test-key"
+        # the fixed key authenticates (legacy pair)
+        from app.state import STATE
+        rec = STATE.api_keys.get(
+            __import__("app.security", fromlist=["api_key_hash"]).api_key_hash(
+                "arx-fixed-test-key"))
+        assert rec and rec["secret"] == "fixed-secret-xyz"
+        assert rec["permissions"] == ["readTrade", "trade"]
+    finally:
+        config.SEED_USER_EMAIL, config.SEED_USER_PASSWORD, \
+            config.SEED_API_KEY, config.SEED_API_SECRET = olds
+        if os.path.exists(path):
+            os.remove(path)

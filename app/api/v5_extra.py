@@ -180,6 +180,72 @@ async def mm_intensity(request: Request):
     return _ok({"mmIntensity": STATE.mm_intensity})
 
 
+@router.post("/admin/reset-users")
+async def reset_users(request: Request):
+    """Wipe ALL users/orders/positions/history, then recreate the single
+    seed account with its FIXED API key. Admin-token guarded."""
+    _require_admin(request)
+    from .. import db as dbm, users as users_mod
+    from ..engine import orders as oms
+    from ..state import STATE
+    from .runtime import get_db
+    database = get_db()
+    if database is None:
+        raise ApiError(E_PARAM, "database unavailable")
+    # 1) cancel every open/conditional user order
+    cancelled = 0
+    for o in list(STATE.open_orders.values()) + list(STATE.conditional.values()):
+        if o.uid > 0:
+            try:
+                oms.cancel_order(o.uid, order_id=o.order_id)
+                cancelled += 1
+            except Exception:
+                pass
+    # 2) force-close every open position at market
+    closed = 0
+    for (uid, sym), pos in list(STATE.positions.items()):
+        if pos.size == 0:
+            continue
+        side = "Sell" if pos.size > 0 else "Buy"
+        try:
+            oms.place_order(uid, sym, side, "Market", abs(pos.size),
+                            reduce_only=True, close_on_trigger=True,
+                            leverage=pos.leverage,
+                            close_reason="AdminReset",
+                            strategy=pos.strategy)
+            closed += 1
+        except Exception:
+            pass
+    # 3) clear in-memory trading state
+    STATE.positions.clear()
+    STATE.open_orders.clear()
+    STATE.conditional.clear()
+    STATE.accounts.clear()
+    STATE.sessions.clear()
+    STATE.api_keys.clear()
+    STATE.leverage.clear()
+    STATE.close_locks.clear()
+    STATE.bots.clear()
+    STATE.faucet.clear()
+    STATE.insurance_pool = 0.0
+    # 4) wipe user-related tables (market data tables untouched)
+    async with database.session() as sess:
+        async with sess.begin():
+            for t in (dbm.t_faucet, dbm.t_closed_trades, dbm.t_executions,
+                      dbm.t_orders, dbm.t_positions, dbm.t_ledger,
+                      dbm.t_futures_balances, dbm.t_balances,
+                      dbm.t_api_keys, dbm.t_sessions, dbm.t_users,
+                      dbm.t_security):
+                await sess.execute(t.delete())
+    # 5) recreate the single seed account + fixed key
+    seed = await users_mod.ensure_seed_user(database)
+    STATE.stats["users"] = 1
+    return _ok({"cancelled_orders": cancelled, "closed_positions": closed,
+                "users_now": 1,
+                "seed_user": (seed or {}).get("email"),
+                "fixed_api_key": (seed or {}).get("api_key")})
+
+
 @router.get("/admin/stats")
 async def admin_stats(request: Request):
     _require_admin(request)

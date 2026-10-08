@@ -117,6 +117,11 @@ async def candles(symbol: str = "BTC/USDT", interval: str = "1m"):
 # --------------------------------------------------------------------------- #
 @router.post("/auth/register")
 async def auth_register(request: Request):
+    from .. import runtime
+    if runtime.get_db() is None:
+        return _err("سرور در حالت کاهش‌یافته است (دیتابیس قطع)؛ چند لحظه بعد تلاش کنید")
+    if config.DISABLE_REGISTRATION:
+        return _err("ثبت‌نام موقتاً غیرفعال است — ورود با حساب اصلی")
     b = await _json(request)
     email = (b.get("email") or "").strip()
     password = b.get("password") or ""
