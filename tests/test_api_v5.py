@@ -559,3 +559,44 @@ def test_seed_user_fixed_key_idempotent():
             config.SEED_API_KEY, config.SEED_API_SECRET = olds
         if os.path.exists(path):
             os.remove(path)
+
+
+# --------------------------------------------------------------------------- #
+# v2.6.1: eternal key — create returns it, revoke refuses it                   #
+# --------------------------------------------------------------------------- #
+def test_eternal_key_undestroyable(client):
+    from app import config
+    old = config.DISABLE_REGISTRATION
+    config.DISABLE_REGISTRATION = True
+    try:
+        # login as the seed (lock-down) account
+        r = client.post("/api/auth/login",
+                        json={"email": config.SEED_USER_EMAIL,
+                              "password": config.SEED_USER_PASSWORD})
+        assert r.json()["ok"], r.text
+        h = {"Authorization": f"Bearer {r.json()['token']}"}
+        # 'create' must return the ETERNAL key, never a random one
+        c = client.post("/api/api-keys/create", headers=h,
+                        json={"label": "whatever"}).json()
+        assert c["ok"] and c.get("fixed") is True
+        assert c["key"] == config.SEED_API_KEY
+        assert c["secret"] == config.SEED_API_SECRET
+        # the eternal key authenticates (legacy pair)
+        w = client.get("/api/wallet", headers={
+            "X-API-Key": config.SEED_API_KEY,
+            "X-API-Secret": config.SEED_API_SECRET}).json()
+        assert w["ok"]
+        # revoking the eternal key is refused
+        keys = client.get("/api/api-keys", headers=h).json()["data"]
+        eternal = next(k for k in keys
+                       if k["label"] == "ثابت اصلی")
+        rv = client.post("/api/api-keys/revoke", headers=h,
+                         json={"id": eternal["id"]}).json()
+        assert rv["ok"] is False and "ابدی" in rv["error"]
+        # still valid after the refused revoke
+        w2 = client.get("/api/wallet", headers={
+            "X-API-Key": config.SEED_API_KEY,
+            "X-API-Secret": config.SEED_API_SECRET}).json()
+        assert w2["ok"]
+    finally:
+        config.DISABLE_REGISTRATION = old

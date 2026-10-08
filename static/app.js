@@ -637,6 +637,10 @@ async function init() {
   $('#api-create').onclick = async () => {
     const r = await api('/api/api-keys/create', {label: $('#api-label').value || 'Trading bot'});
     if (!r.ok) return toast(r.error || 'ساخت کلید ناموفق بود', 'err');
+    if (r.fixed) {
+      $('#api-result').innerHTML = `<div style="color:#f0b429;font-weight:700;margin-bottom:6px">🔑 کلید ابدی شما (همیشگی — هرگز حذف یا تغییر نمی‌کند)</div><b>API Key:</b><code>${r.key}</code><br><b>Secret:</b><code>${r.secret}</code><br><small style="color:var(--mut)">این کلید پس از ری‌استارت/ری‌دپلوی سرور هم دقیقاً همین می‌ماند؛ همین را در ربات قرار دهید — نیازی به ساخت مجدد نیست.</small>`;
+      return;
+    }
     $('#api-result').innerHTML = `<b>API Key:</b><code>${r.key}</code><br><b>Secret:</b><code>${r.secret}</code><br>اکنون در جای امن ذخیره کنید؛ Secret دوباره نمایش داده نمی‌شود.<br><small style="color:var(--mut)">احراز هویت به سبک Bybit v5 (هدرهای X-BAPI-*) — نمونه پایتون: <code>scripts/ws_smoke_test.py</code> و مستندات: <code>API_REFERENCE.md</code></small>`;
   };
   $('#tab-login').onclick = () => { $('#tab-login').classList.add('active'); $('#tab-register').classList.remove('active'); $('#name-field').classList.add('hidden'); $('#auth-submit').textContent = 'ورود'; };

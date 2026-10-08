@@ -499,6 +499,15 @@ async def api_keys_list(request: Request):
 async def api_keys_create(request: Request):
     uid = await _uid(request)
     b = await _json(request)
+    # Lock-down mode: the owner always receives the ETERNAL key — a new
+    # random key is never created, so nothing can be lost on restart.
+    if config.DISABLE_REGISTRATION:
+        rec = STATE.api_keys.get(security.api_key_hash(config.SEED_API_KEY))
+        if rec and rec.get("uid") == uid:
+            return {"ok": True, "key": config.SEED_API_KEY,
+                    "secret": config.SEED_API_SECRET,
+                    "permissions": rec["permissions"], "fixed": True,
+                    "warning": "کلید ابدی — هرگز منقضی یا حذف نمی‌شود؛ همین را در ربات بگذارید"}
     perms = ["readTrade", "trade"] if b.get("trade", True) else ["readTrade"]
     rec = await users.create_api_key(get_db(), uid,
                                      b.get("label") or "Trading bot",
@@ -514,6 +523,23 @@ async def api_keys_create(request: Request):
 async def api_keys_revoke(request: Request):
     uid = await _uid(request)
     b = await _json(request)
+    # The eternal key is permanent by user request: it can only be removed
+    # by changing the server's SEED_API_KEY env — never via UI/API.
+    if config.DISABLE_REGISTRATION:
+        from .. import db as _db
+        from sqlalchemy import select
+        try:
+            kid = int(b.get("id", 0))
+        except (TypeError, ValueError):
+            return _err("شناسه نامعتبر")
+        async with get_db().session() as sess:
+            row = (await sess.execute(
+                select(_db.t_api_keys)
+                .where((_db.t_api_keys.c.id == kid) &
+                       (_db.t_api_keys.c.uid == uid)))).mappings().first()
+        if row and row["key_hash"] == security.api_key_hash(config.SEED_API_KEY):
+            return _err("این کلید ثابت و ابدی است؛ فقط از تنظیمات سرور "
+                        "(متغیر SEED_API_KEY) قابل حذف است")
     try:
         await users.revoke_api_key(get_db(), uid, int(b.get("id", 0)))
     except (TypeError, ValueError):
