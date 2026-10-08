@@ -188,7 +188,6 @@ async def reset_users(request: Request):
     from .. import db as dbm, users as users_mod
     from ..engine import orders as oms
     from ..state import STATE
-    from .runtime import get_db
     database = get_db()
     if database is None:
         raise ApiError(E_PARAM, "database unavailable")

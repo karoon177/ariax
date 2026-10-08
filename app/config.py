@@ -39,7 +39,8 @@ MAX_RECV_WINDOW = 60000
 
 # ---- single-user lock-down mode (temporary) ----
 # DISABLE_REGISTRATION=1 blocks /api/auth/register entirely.
-DISABLE_REGISTRATION = os.environ.get("DISABLE_REGISTRATION", "0") == "1"
+DISABLE_REGISTRATION = os.environ.get(
+    "DISABLE_REGISTRATION", "0").strip().lower() in ("1", "true", "yes", "on")
 # The one account that always exists (auto-recreated on every boot).
 SEED_USER_EMAIL = os.environ.get("SEED_USER_EMAIL", "karoon177@gmail.com")
 SEED_USER_PASSWORD = os.environ.get("SEED_USER_PASSWORD", "karoon177@gmail.com")
