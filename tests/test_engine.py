@@ -360,3 +360,29 @@ def test_open_interest_and_ticker_sizes():
     tk = ticker_v5("SOLUSD", STATE.tick("SOLUSD"))
     assert float(tk["bid1Price"]) > 0 and float(tk["bid1Size"]) >= 0
     assert float(tk["openInterest"]) == pytest.approx(500.0)
+
+
+# --------------------------------------------------------------------------- #
+# v2.6.2: exchange-side auto-protection guard                                  #
+# --------------------------------------------------------------------------- #
+def test_protection_guard_arms_unprotected_positions():
+    """Positions without tp/sl/trailing automatically get a safety SL
+    halfway to liquidation — a dead bot can't leave them bare."""
+    from app.engine import risk as riskmod
+    STATE.account(1).fbalances["USDT"] = 1e6
+    orders.place_order(0, "SOLUSD", "Sell", "Limit", 100.0, price=150.0,
+                       is_agent=True)
+    orders.place_order(1, "SOLUSD", "Buy", "Limit", 100.0, price=150.0,
+                       leverage=5)
+    pos = STATE.position(1, "SOLUSD")
+    assert pos.sl is None and pos.tp is None
+    armed = riskmod.protection_guard()
+    assert armed >= 1
+    pos = STATE.position(1, "SOLUSD")
+    liq = pos.liquidation_price()
+    expected = 150.0 + (liq - 150.0) * 0.5      # halfway entry → liq
+    assert pos.sl is not None and abs(pos.sl - expected) < 0.01
+    # already-protected positions are left untouched
+    before = pos.sl
+    riskmod.protection_guard()
+    assert STATE.position(1, "SOLUSD").sl == before

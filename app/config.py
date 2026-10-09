@@ -53,6 +53,16 @@ SEED_API_SECRET = os.environ.get(
     "SEED_API_SECRET",
     "Kf9mWx2vQz7RtN4pZb8LhY3jT6sEgUa5cHn1oPzIkM0yBvVXe")
 
+# ---- automatic position protection (exchange-side safety net) ----
+# Any open position WITHOUT tp/sl/trailing gets an automatic stop-loss
+# armed by the exchange's own risk loop — so a dead/disconnected bot
+# can never leave a position unprotected (root cause of the reported
+# unclosed losing trades). SL is placed AUTO_ARM_SL_PCT of the way
+# from entry toward the liquidation price.
+AUTO_ARM_SL_ENABLED = os.environ.get(
+    "AUTO_ARM_SL", "1").strip().lower() in ("1", "true", "yes", "on")
+AUTO_ARM_SL_PCT = float(os.environ.get("AUTO_ARM_SL_PCT", "0.5"))
+
 
 # Fee schedule (mirror of Bybit non-VIP defaults for linear; spot kept at
 # AriaX v1 values to avoid surprising existing UI users — see MIGRATION_GUIDE).

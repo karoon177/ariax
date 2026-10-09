@@ -163,17 +163,48 @@ def _bankruptcy_settle(uid: int, symbol: str, pos, mark: float) -> None:
     matching.persist_all_user_state(uid)
 
 
+def protection_guard() -> int:
+    """Exchange-side safety net: arm an automatic stop-loss on every open
+    position that has no tp/sl/trailing (a dead bot can no longer leave
+    positions unprotected). Returns the number of stops armed."""
+    if not config.AUTO_ARM_SL_ENABLED:
+        return 0
+    armed = 0
+    for (uid, symbol), pos in list(STATE.positions.items()):
+        if pos.size == 0 or pos.tp or pos.sl or pos.trailing:
+            continue
+        liq = pos.liquidation_price()
+        if liq <= 0:
+            continue
+        # SL sits AUTO_ARM_SL_PCT of the way entry -> liquidation
+        sl = pos.entry + (liq - pos.entry) * config.AUTO_ARM_SL_PCT
+        step = config.MARKETS[symbol].tick
+        sl = max(step, round(sl / step) * step)
+        try:
+            orders.set_trading_stop(uid, symbol, sl=sl)
+            armed += 1
+            agent_log(f"🛡 محافظت خودکار: حد ضرر {sl:,.4f} روی {symbol} "
+                      f"کاربر #{uid} تنظیم شد (پوزیشن بی‌محافظ بود)")
+        except Exception as exc:
+            agent_log(f"محافظت خودکار {symbol} ناموفق: {exc}")
+    return armed
+
+
 # --------------------------------------------------------------------------- #
 # Master risk loop                                                             #
 # --------------------------------------------------------------------------- #
 async def risk_loop() -> None:
-    """Evaluate triggers, TP/SL and liquidations every 250 ms."""
+    """Evaluate triggers, TP/SL, liquidations + protection guard."""
     import asyncio
+    n = 0
     while True:
         try:
             orders.check_triggers()
             orders.check_position_tpsl()
             liquidation_check()
+            n += 1
+            if n % 8 == 0:          # ~every 2 seconds
+                protection_guard()
         except Exception:
             import logging
             logging.getLogger("ariax.risk").exception("risk loop error")

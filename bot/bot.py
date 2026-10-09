@@ -1270,6 +1270,19 @@ class QuantEngine:
             resp = await self.ariax.place_order(sym, sig["action"], qty, lev=LEVERAGE, order_type="market", strategy=sig.get("strat", ""))
             log.info(f"ORDER RESP {sym}: {str(resp)[:200]}")
 
+            # ── exchange-native protection: arm SL/TP on the SERVER so the
+            #    position is protected even if this bot dies/disconnects ──
+            if resp.get("ok") and sig.get("sl") and sig.get("tp"):
+                try:
+                    await self.ariax._req("POST", "/api/tpsl", {
+                        "symbol": sym,
+                        "sl": float(sig["sl"]),
+                        "tp": float(sig["tp"])})
+                    log.info(f"🛡 SL/TP سمت صرافی مسلح شد: {sym} "
+                             f"SL={sig['sl']:.6g} TP={sig['tp']:.6g}")
+                except Exception as e:
+                    log.warning(f"tpsl arm failed {sym}: {e}")
+
             fill = price
             filled = qty
             if isinstance(resp, dict):
