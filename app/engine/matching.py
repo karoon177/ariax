@@ -423,6 +423,8 @@ def execute(o: Order) -> Order:
     else:
         o.status = "Filled"
         o.updated_ms = util.now_ms()
+    if o.uid > 0:
+        sanitize_close_locks(o.uid, o.symbol)
     return o
 
 
@@ -432,3 +434,25 @@ def _unlock_close_qty(o: Order, qty: float) -> None:
     STATE.close_locks[key] = max(0.0, cur - qty)
     if STATE.close_locks[key] <= EPS:
         STATE.close_locks.pop(key, None)
+
+
+def sanitize_close_locks(uid: int, symbol: str) -> float:
+    """Clamp stale close-locks to the live position size.
+
+    Root cause of the open/close deadlock: position flips (and partial
+    closes of flipped orders) leave close_locks above the real position
+    size, after which EVERY order on that symbol is misclassified as an
+    over-close and rejected with 'qty exceeds position size'.
+    Returns the (removed) excess."""
+    key = (uid, symbol)
+    cur = STATE.close_locks.get(key, 0.0)
+    pos = STATE.positions.get(key)
+    cap = abs(pos.size) if pos else 0.0
+    if cur > cap + 1e-12:
+        excess = cur - cap
+        if cap <= 1e-12:
+            STATE.close_locks.pop(key, None)
+        else:
+            STATE.close_locks[key] = cap
+        return excess
+    return 0.0

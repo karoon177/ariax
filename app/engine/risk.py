@@ -171,7 +171,10 @@ def protection_guard() -> int:
         return 0
     armed = 0
     for (uid, symbol), pos in list(STATE.positions.items()):
-        if pos.size == 0 or pos.tp or pos.sl or pos.trailing:
+        if pos.size == 0:
+            continue
+        matching.sanitize_close_locks(uid, symbol)
+        if pos.tp or pos.sl or pos.trailing:
             continue
         liq = pos.liquidation_price()
         if liq <= 0:

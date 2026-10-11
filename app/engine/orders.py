@@ -273,10 +273,23 @@ def _reserve(o: Order) -> None:
         return
     # linear (FUTURES wallet with spot auto-bridge)
     pos = STATE.position(o.uid, o.symbol)
-    opening = not pos or pos.size == 0 or (pos.size > 0) == (o.side == "Buy")
-    if opening and not o.reduce_only:
+    # Binance one-way semantics:
+    #  - reduceOnly orders are capped at the closeable position size;
+    #  - any other order may close AND flip/open: only the OPENING part
+    #    escrows margin; the closing part reserves just its fee — so a
+    #    wallet drained by open positions can still CLOSE them.
+    if not o.reduce_only:
+        from .matching import sanitize_close_locks
+        sanitize_close_locks(o.uid, o.symbol)
+        reducing = pos is not None and pos.size != 0 and \
+            (pos.size > 0) != (o.side == "Buy")
+        close_part = min(o.qty, abs(pos.size) -
+                         STATE.close_locks.get((o.uid, o.symbol), 0.0)) \
+            if reducing else 0.0
+        close_part = max(0.0, close_part)
+        open_part = o.qty - close_part
         lev = o.leverage
-        need_margin = o.est_price * o.qty / lev * 1.05
+        need_margin = o.est_price * open_part / lev * 1.05
         need_fee = o.est_price * o.qty * config.LINEAR_TAKER_FEE
         shortfall = (need_margin + need_fee) - STATE.free_margin(o.uid)
         if shortfall > 1e-9:
@@ -288,7 +301,12 @@ def _reserve(o: Order) -> None:
                     "Futures wallet via /v5/asset/transfer/inter-transfer "
                     "or the wallet page)")
         acct.add_hold(o.id, "USDT", need_margin + need_fee, bucket="futures")
+        if close_part > 0:
+            STATE.close_locks[(o.uid, o.symbol)] = \
+                STATE.close_locks.get((o.uid, o.symbol), 0.0) + close_part
     else:
+        from .matching import sanitize_close_locks
+        sanitize_close_locks(o.uid, o.symbol)   # heal stale locks first
         avail_size = abs(pos.size) - STATE.close_locks.get((o.uid, o.symbol), 0.0) \
             if pos else 0.0
         if o.qty > avail_size + 1e-9:

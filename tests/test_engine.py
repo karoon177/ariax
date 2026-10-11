@@ -386,3 +386,48 @@ def test_protection_guard_arms_unprotected_positions():
     before = pos.sl
     riskmod.protection_guard()
     assert STATE.position(1, "SOLUSD").sl == before
+
+
+# --------------------------------------------------------------------------- #
+# v2.6.3: stale close-lock deadlock (open/close bug report)                    #
+# --------------------------------------------------------------------------- #
+def test_flip_order_does_not_deadlock():
+    """Position FLIP (buy 0.05 over a 0.03 short) must not leave stale
+    close-locks that block every later open/close on the symbol."""
+    STATE.account(1).fbalances["USDT"] = 1e6
+    orders.place_order(0, "SOLUSD", "Buy", "Limit", 0.30, price=150.0,
+                       is_agent=True)
+    orders.place_order(1, "SOLUSD", "Sell", "Limit", 0.15, price=150.0,
+                       leverage=5)          # short 0.15
+    assert STATE.position(1, "SOLUSD").size == pytest.approx(-0.15)
+    # FLIP: buy 0.25 (closes 0.15, opens long 0.10) — fresh liquidity
+    # at a separate price so it cannot cross the resting agent bid.
+    orders.place_order(0, "SOLUSD", "Sell", "Limit", 0.25, price=151.0,
+                       is_agent=True)
+    orders.place_order(1, "SOLUSD", "Buy", "Limit", 0.25, price=151.0,
+                       leverage=5)
+    pos = STATE.position(1, "SOLUSD")
+    assert pos.size == pytest.approx(0.10)
+    key = (1, "SOLUSD")
+    assert STATE.close_locks.get(key, 0.0) <= abs(pos.size) + 1e-9
+    # the deadlock check: a fresh OPEN must NOT be misclassified as a close
+    orders.place_order(0, "SOLUSD", "Sell", "Limit", 0.10, price=152.0,
+                       is_agent=True)
+    o = orders.place_order(1, "SOLUSD", "Buy", "Limit", 0.05, price=152.0,
+                           leverage=5)      # increases the long
+    assert o.status in ("New", "Filled")   # accepted — NOT rejected
+    # and a FULL-size close works (reduce-only, no margin needed)
+    orders.place_order(0, "SOLUSD", "Buy", "Limit", 0.15, price=149.0,
+                       is_agent=True)
+    c = orders.place_order(1, "SOLUSD", "Sell", "Limit", 0.15, price=149.0,
+                           reduce_only=True)
+    assert c.status in ("Filled", "PartiallyFilled")
+    assert STATE.close_locks.get(key, 0.0) <= 1e-9
+
+
+def test_sanitize_heals_bare_stale_lock():
+    """A position deleted under a leftover lock self-heals to zero."""
+    from app.engine.matching import sanitize_close_locks
+    STATE.close_locks[(7, "SOLUSD")] = 5.0          # stale, no position
+    excess = sanitize_close_locks(7, "SOLUSD")
+    assert excess == 5.0 and (7, "SOLUSD") not in STATE.close_locks
