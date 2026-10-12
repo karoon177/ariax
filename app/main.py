@@ -73,12 +73,22 @@ async def load_state(database: dbm.Database) -> None:
             if row["free"]:
                 acct.fbalances[row["asset"]] = row["free"]
 
-        # --- positions ---------------------------------------------------- #
+        # --- positions (skip zero-size ghosts; they are CLOSED) --------- #
         res = await sess.execute(select(dbm.t_positions))
+        ghosts = 0
         for row in res.mappings():
-            if row["size"] and row["size"] != 0:
+            if row["size"] and abs(row["size"]) > 1e-12:
                 STATE.positions[(row["uid"], row["symbol"])] = \
-                    type("P", (), {})() if False else _pos_from_row(row)
+                    _pos_from_row(row)
+            else:
+                ghosts += 1
+                await sess.execute(dbm.t_positions.delete().where(
+                    (dbm.t_positions.c.uid == row["uid"]) &
+                    (dbm.t_positions.c.symbol == row["symbol"])))
+        if ghosts:
+            await sess.commit()
+            log.warning("load_state: purged %d zero-size position ghost(s)",
+                        ghosts)
 
         # --- leverage map -------------------------------------------------- #
         res = await sess.execute(select(dbm.t_meta))

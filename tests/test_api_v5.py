@@ -332,10 +332,13 @@ def test_ws_legacy_ui_protocol(client):
 # Rate limiting & security                                                     #
 # --------------------------------------------------------------------------- #
 def test_rate_limit_public(client):
+    from app.api import deps
     codes = []
     for _ in range(45):
         codes.append(client.get("/v5/market/time").status_code)
     assert codes.count(429) >= 1
+    # IMPORTANT: clear the limiter so subsequent tests are not blocked
+    deps.RL._hits.clear()
 
 
 def test_legacy_api_shapes(client):

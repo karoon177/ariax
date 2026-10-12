@@ -112,8 +112,10 @@ async def _write_balances(session, uid: int, vals: dict, fvals: dict) -> None:
 def _persist_position(uid: int, symbol: str) -> None:
     pos = STATE.positions.get((uid, symbol))
     ts = util.now_ms()
-    if pos is None:
-        events.BUS.emit("persist", lambda s: _delete_position(s, uid, symbol))
+    if pos is None or abs(pos.size) < 1e-12:
+        # closed position: DELETE the row (never write size=0 ghosts)
+        events.BUS.emit("persist",
+                        lambda s: _delete_position(s, uid, symbol))
         return
     snap = dict(size=pos.size, entry=pos.entry, leverage=pos.leverage,
                 margin=pos.margin, tp=pos.tp, sl=pos.sl,

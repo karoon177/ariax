@@ -252,6 +252,13 @@ class Persister:
         self._task = asyncio.get_running_loop().create_task(self._run(), name="persister")
 
     async def stop(self) -> None:
+        # FULL drain before shutdown: pending position deletes/balances
+        # must reach the database, otherwise a restart resurrects closed
+        # positions ("manually closed trades reappearing" bug).
+        try:
+            await self.flush(timeout=8.0)
+        except Exception:
+            pass
         await self.queue.put(None)
         if self._task:
             await asyncio.wait_for(self._task, timeout=10)
@@ -262,6 +269,27 @@ class Persister:
             self.queue.put_nowait(fn)
         except asyncio.QueueFull:  # pragma: no cover - safety valve
             pass
+
+    async def flush(self, timeout: float = 5.0) -> None:
+        """Drain the pending write queue NOW (used at shutdown and before
+        critical reads so a restart can never resurrect stale state)."""
+        import asyncio as _aio
+        deadline = _aio.get_event_loop().time() + timeout
+        while not self.queue.empty() and _aio.get_event_loop().time() < deadline:
+            try:
+                item = self.queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if item is None:
+                continue
+            try:
+                async with self.db.session() as sess:
+                    async with sess.begin():
+                        await item(sess)
+                self.queue.task_done()
+            except Exception as exc:
+                import logging
+                logging.getLogger("ariax.db").exception("flush error: %s", exc)
 
     async def _run(self) -> None:
         while True:

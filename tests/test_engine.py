@@ -431,3 +431,77 @@ def test_sanitize_heals_bare_stale_lock():
     STATE.close_locks[(7, "SOLUSD")] = 5.0          # stale, no position
     excess = sanitize_close_locks(7, "SOLUSD")
     assert excess == 5.0 and (7, "SOLUSD") not in STATE.close_locks
+
+
+# --------------------------------------------------------------------------- #
+# v2.6.4: closed positions must NEVER resurrect after a restart                #
+# --------------------------------------------------------------------------- #
+def test_closed_position_never_resurrects():
+    """End-to-end: open → close → re-load state from the DB → the
+    position must be GONE (the reported 'closed trades reappeared' bug)."""
+    import asyncio, os
+    from app.db import Database
+    from app.engine import matching
+    from app.state import STATE, Position
+
+    path = "./data/resurrect.db"
+    if os.path.exists(path):
+        os.remove(path)
+
+    async def scenario():
+        from app.db import Persister
+        d = Database("sqlite+aiosqlite:///./data/resurrect.db")
+        await d.create_all()
+        p = Persister(d)
+        p.start()
+        # open a position
+        STATE.account(1).fbalances["USDT"] = 1e6
+        orders.place_order(0, "SOLUSD", "Buy", "Limit", 0.2, price=150.0,
+                           is_agent=True)
+        orders.place_order(1, "SOLUSD", "Sell", "Limit", 0.1, price=150.0,
+                           leverage=5)
+        assert STATE.position(1, "SOLUSD") is not None
+        # persist it
+        matching._persist_position(1, "SOLUSD")
+        await asyncio.sleep(0.2)
+        # close it fully: closing a SHORT needs ASK liquidity (agent Sell)
+        orders.place_order(0, "SOLUSD", "Sell", "Limit", 0.1, price=150.5,
+                           is_agent=True)
+        orders.place_order(1, "SOLUSD", "Buy", "Limit", 0.1, price=150.5,
+                           leverage=5)
+        assert STATE.position(1, "SOLUSD") is None, \
+            f"close failed: {STATE.position(1, 'SOLUSD')}"
+        matching._persist_position(1, "SOLUSD")
+        await p.stop()          # drain like a graceful shutdown
+        return d
+
+    async def check(d):
+        from sqlalchemy import select
+        from app import db as dbm
+        async with d.session() as sess:
+            rows = (await sess.execute(
+                select(dbm.t_positions))).mappings().all()
+        return rows
+
+    d = asyncio.run(scenario())
+    rows = asyncio.run(check(d))
+    assert rows == [], f"position resurrected! rows={rows}"
+    # and load_state must also purge zero-size ghosts if any exist
+    STATE.positions.clear()
+    async def inject_ghost():
+        from app import db as dbm
+        async with d.session() as sess:
+            await sess.execute(dbm.t_positions.insert().values(
+                uid=1, symbol="ETHUSD", size=0.0, entry=0.0, leverage=5,
+                margin=0.0, updated_ms=0))
+            await sess.commit()
+    asyncio.run(inject_ghost())
+    async def reload():
+        from app.main import load_state
+        STATE.positions.clear()
+        await load_state(d)
+    asyncio.run(reload())
+    assert (1, "ETHUSD") not in STATE.positions, "ghost resurrected!"
+    assert STATE.position(1, "SOLUSD") is None
+    if os.path.exists(path):
+        os.remove(path)
