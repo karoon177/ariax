@@ -71,7 +71,8 @@ async def config_endpoint():
                        vol=0.002, tick=m.tick, step=m.qty_step,
                        minq=m.min_qty, qbase=m.qbase, maxlev=m.max_lev)
     return {"ok": True, "data": data, "assets": config.LISTED_ASSETS,
-            "transfers_enabled": not config.DISABLE_API_TRANSFERS,
+            "transfers_enabled": True,   # UI (session) transfers allowed
+            "api_transfers_enabled": not config.DISABLE_API_TRANSFERS,
             "fees": dict(taker=config.LINEAR_TAKER_FEE,
                          maker=config.LINEAR_MAKER_FEE,
                          liq=config.LIQUIDATION_FEE_RATE,
@@ -361,12 +362,16 @@ async def wallet(request: Request):
 
 @router.post("/transfer")
 async def transfer_funds(request: Request):
-    """Move real funds between the Spot and Futures wallets (UI).
+    """Move real funds between the Spot and Futures wallets.
 
-    Disabled by administrator policy: users cannot move balances via
-    API/UI; the engine's internal auto-bridge funds margin on demand."""
+    Policy: transfers are allowed ONLY for the logged-in UI user
+    (browser session). Requests authenticated with an API key (bots)
+    are refused — the engine's auto-bridge still funds margin on demand.
+    """
     uid = await _uid(request)
-    if config.DISABLE_API_TRANSFERS:
+    if config.DISABLE_API_TRANSFERS and (
+            request.headers.get("X-API-Key")
+            or request.headers.get("X-BAPI-API-KEY")):
         return _err(config.TRANSFER_BLOCK_MSG)
     b = await _json(request)
     frm = (b.get("from") or "").lower()

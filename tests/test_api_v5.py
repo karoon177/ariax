@@ -375,20 +375,21 @@ def test_inter_transfer_compatibility(client):
     from app import config
     token, _ = _register(client, "transfer@example.com")
     key, secret = _make_key(client, token)
-    # ── ADMIN LOCK: all API transfers must be refused by default ──
+    # ── POLICY: API-key transfers blocked, UI (session) transfers OK ──
     blocked = _signed(client, "POST", "/v5/asset/transfer/inter-transfer",
                       key, secret,
                       body={"transferId": "blk-1", "coin": "USDT",
                             "amount": "100", "fromAccountType": "SPOT",
                             "toAccountType": "CONTRACT"})
     assert blocked.json()["retCode"] != 0
-    ui_blk = client.post("/api/transfer",
-                         headers={"Authorization": f"Bearer {token}"},
-                         json={"from": "spot", "to": "futures", "amount": 50})
-    assert not ui_blk.json()["ok"] and "غیرفعال" in ui_blk.json()["error"]
+    key_blk = client.post("/api/transfer",
+                          headers={"X-API-Key": key, "X-API-Secret": secret},
+                          json={"from": "spot", "to": "futures", "amount": 50})
+    assert not key_blk.json()["ok"] and "API" in key_blk.json()["error"]
     cfg = client.get("/api/config").json()
-    assert cfg["transfers_enabled"] is False
-    # ── mechanics still intact when an admin re-enables them ──
+    assert cfg["transfers_enabled"] is True          # UI allowed
+    assert cfg["api_transfers_enabled"] is False     # bots blocked
+    # ── mechanics still intact when an admin re-enables API transfers ──
     config.DISABLE_API_TRANSFERS = False
     # 1) classic bot flow: fund the CONTRACT (futures) wallet from SPOT
     r = _signed(client, "POST", "/v5/asset/transfer/inter-transfer", key, secret,
@@ -446,28 +447,40 @@ def test_inter_transfer_compatibility(client):
     assert wl["accountType"] == "CONTRACT"
     assert float(wl["coin"][0]["walletBalance"]) == 3_000
     config.DISABLE_API_TRANSFERS = True   # restore the admin lock
+    # UI (session) transfer must STILL work under the lock
+    ui_ok = client.post("/api/transfer",
+                        headers={"Authorization": f"Bearer {token}"},
+                        json={"from": "spot", "to": "futures", "amount": 50})
+    assert ui_ok.json()["ok"] and ui_ok.json()["futures"] >= 50
 
 
 def test_dual_wallet_auto_bridge_and_ui_transfer(client):
     """UI transfer endpoint + transparent spot→futures auto-bridge."""
     token, _ = _register(client, "dual@example.com")
     h = {"Authorization": f"Bearer {token}"}
-    # 1) UI transfer is ADMIN-LOCKED: must be refused with Persian error
+    # 1) UI (session) transfer WORKS under the API lock
     t0 = client.post("/api/transfer", headers=h,
                      json={"from": "spot", "to": "futures", "amount": 5000})
-    assert not t0.json()["ok"] and "غیرفعال" in t0.json()["error"]
-    # 2) linear order still works: the SERVER auto-bridges margin on demand
+    assert t0.json()["ok"] and t0.json()["futures"] == 5000
+    # 1b) but the same endpoint with an API KEY is refused
+    tk = client.post("/api/api-keys/create", headers=h,
+                     json={"label": "xfer", "trade": True}).json()
+    key_blk = client.post("/api/transfer",
+                          headers={"X-API-Key": tk["key"],
+                                   "X-API-Secret": tk["secret"]},
+                          json={"from": "spot", "to": "futures", "amount": 10})
+    assert not key_blk.json()["ok"] and "API" in key_blk.json()["error"]
+    # 2) linear order works: the SERVER auto-bridges margin on demand
     r = client.post("/api/order", headers=h, json={
         "symbol": "BTCUSD", "side": "buy", "type": "limit",
         "price": 95_000, "qty": 0.2, "lev": 10})   # > futures free → bridge
     assert r.json()["ok"], r.text
     w = client.get("/api/wallet", headers=h).json()
     assert w["futures"]["locks"]["USDT"] > 0        # margin escrowed
-    assert w["balances"]["USDT"] < 20_000           # bridged from spot
-    # 3) reverse transfer also locked
+    # 3) reverse UI transfer works too
     t = client.post("/api/transfer", headers=h,
-                    json={"from": "futures", "to": "spot", "amount": 100})
-    assert not t.json()["ok"] and "غیرفعال" in t.json()["error"]
+                    json={"from": "futures", "to": "spot", "amount": 1000})
+    assert t.json()["ok"]
 
 
 # --------------------------------------------------------------------------- #

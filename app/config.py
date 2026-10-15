@@ -66,8 +66,8 @@ AUTO_ARM_SL_ENABLED = os.environ.get(
 # active, so bots keep working without manual transfers.
 DISABLE_API_TRANSFERS = os.environ.get(
     "DISABLE_API_TRANSFERS", "1").strip().lower() in ("1", "true", "yes", "on")
-TRANSFER_BLOCK_MSG = ("انتقال وجه بین کیف اسپات و فیوچرز از طریق API غیرفعال است؛ "
-                      "هنگام ثبت سفارش، مارجین موردنیاز به‌صورت خودکار تأمین می‌شود")
+TRANSFER_BLOCK_MSG = ("انتقال وجه از طریق API/ربات غیرفعال است؛ "
+                      "فقط از صفحه کیف پول سایت (با ورود کاربری) امکان‌پذیر است")
 AUTO_ARM_SL_PCT = float(os.environ.get("AUTO_ARM_SL_PCT", "0.5"))
 
 
