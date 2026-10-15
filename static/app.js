@@ -343,7 +343,9 @@ function renderDualWallets() {
     <div style="flex:1;min-width:240px;border:1px solid var(--line,var(--mut));border-radius:12px;padding:14px">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <b>${icon} ${title}</b>
-        <button class="mini ghost" onclick="transferModal('${dir}')">${btnLabel}</button>
+        ${S.transfers_enabled === false
+          ? '<span style="font-size:.72rem;color:var(--mut)">قفل انتقال 🔒 (مارجین خودکار)</span>'
+          : `<button class="mini ghost" onclick="transferModal('${dir}')">${btnLabel}</button>`}
       </div>
       <div class="num" style="font-size:1.35rem;margin:8px 0 2px;color:${color}">${fmt(free, 4)} <span style="font-size:.75rem;opacity:.7">USDT</span></div>
       <div style="font-size:.8rem;opacity:.75">در سفارش/مارجین: ${fmt(lock, 4)} · قابل استفاده: ${fmt(Math.max(0, free - lock), 4)}</div>
@@ -354,6 +356,8 @@ function renderDualWallets() {
 }
 
 window.transferModal = async (direction) => {
+  if (S.transfers_enabled === false)
+    return toast('انتقال بین کیف‌ها توسط مدیر غیرفعال است — هنگام معامله، مارجین خودکار تأمین می‌شود', 'warn');
   const toName = direction === 'spot_to_futures' ? 'فیوچرز' : 'اسپات';
   const fromName = direction === 'spot_to_futures' ? 'اسپات' : 'فیوچرز';
   const src = direction === 'spot_to_futures' ? S.wallet.spot : S.wallet.futures;
@@ -579,7 +583,7 @@ async function loadSymbolData() {
 /* ---------------- init ---------------- */
 async function init() {
   const cfg = await api('/api/config');
-  if (cfg.ok) S.cfg = cfg.data;
+  if (cfg.ok) { S.cfg = cfg.data; S.transfers_enabled = cfg.transfers_enabled !== false; }
   if (localStorage.getItem('ax_uid')) S.uid = parseInt(localStorage.getItem('ax_uid'));
   setAuthUI();
   await tryAutoLogin();
@@ -734,23 +738,26 @@ async function loadTradeReport() {
   $('#report-chips').innerHTML =
     chip('تریدها', s.trades || 0) +
     chip('نرخ برد', (s.winrate || 0) + '%', (s.winrate >= 50 ? 'g' : 'r')) +
-    chip('خالص', (s.net >= 0 ? '+' : '') + fmt(s.net, 4) + '$', s.net >= 0 ? 'g' : 'r') +
-    chip('کارمزد', fmt(s.fees, 4) + '$') +
-    chip('فاندینگ', fmt(s.funding, 4) + '$', (s.funding <= 0 ? 'r' : 'g')) +
+    chip('خالص (USDT)', (s.net >= 0 ? '+' : '') + fmt(s.net, 4), s.net >= 0 ? 'g' : 'r') +
+    chip('کارمزد (USDT)', fmt(s.fees, 4)) +
+    chip('فاندینگ (USDT)', fmt(s.funding, 4), (s.funding <= 0 ? 'r' : 'g')) +
+    chip('حجم کل', '$' + fmt(s.total_notional_usdt || 0, 0)) +
     chip('میانگین نگهداری', (s.avg_hold_min || 0) + 'د') +
-    chip('بدترین', fmt(s.worst, 3) + '$', 'r') + chip('بهترین', fmt(s.best, 3) + '$', 'g');
+    chip('بدترین', fmt(s.worst, 3), 'r') + chip('بهترین', fmt(s.best, 3), 'g');
   $('#report-chips').innerHTML += `<button class="mini ghost" onclick="downloadTradesCSV()" style="cursor:pointer">⬇️ دانلود CSV</button>`;
   $('#tbl-report tbody').innerHTML = (r.data || []).map(t => {
     const dt = new Date((t.ts || 0) * 1000).toLocaleString('fa-IR', { hour12: false });
     return `<tr><td class="num" style="font-size:.75rem">${dt}</td><td><b>${t.symbol}</b></td>
       <td class="${t.side === 'long' ? 'g' : 'r'}">${t.side === 'long' ? 'لانگ' : 'شورت'}${t.partial ? ' <small>(جزئی)</small>' : ''}</td>
-      <td class="num">${fmt(t.qty, 6)}</td><td class="num">${fmt(t.entry, 6)}</td><td class="num">${fmt(t.exit, 6)}</td>
+      <td class="num">${fmt(t.qty, 6)}</td>
+      <td class="num" style="color:#f0b429">$${fmt(t.notional_usdt || t.qty * t.entry, 2)}</td>
+      <td class="num">${fmt(t.entry, 6)}</td><td class="num">${fmt(t.exit, 6)}</td>
       <td class="num">${fmt(t.fees, 4)}</td><td class="num ${t.funding <= 0 ? 'r' : 'g'}">${fmt(t.funding, 4)}</td>
-      <td class="num ${t.net >= 0 ? 'g' : 'r'}"><b>${fmt(t.net, 4)}</b></td>
+      <td class="num ${t.net >= 0 ? 'g' : 'r'}"><b>${fmt(t.net, 4)} USDT</b><br><small style="opacity:.7">${t.net >= 0 ? '+' : ''}${fmt(t.net_pct || 0, 2)}%</small></td>
       <td class="num">${fmt(t.hold_min, 0)}د</td>
       <td>${REASON_FA[t.reason] || t.reason}</td>
       <td style="font-size:.75rem">${t.strategy || '—'}</td></tr>`;
-  }).join('') || '<tr><td colspan="12" style="text-align:center;color:var(--mut)">هنوز معامله بسته‌شده‌ای ندارید</td></tr>';
+  }).join('') || '<tr><td colspan="13" style="text-align:center;color:var(--mut)">هنوز معامله بسته‌شده‌ای ندارید</td></tr>';
 }
 
 window.downloadTradesCSV = async () => {

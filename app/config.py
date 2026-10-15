@@ -61,6 +61,13 @@ SEED_API_SECRET = os.environ.get(
 # from entry toward the liquidation price.
 AUTO_ARM_SL_ENABLED = os.environ.get(
     "AUTO_ARM_SL", "1").strip().lower() in ("1", "true", "yes", "on")
+# Block ALL user-initiated wallet transfers (spot<->futures) via API.
+# The server-side auto-bridge that funds margin during trading stays
+# active, so bots keep working without manual transfers.
+DISABLE_API_TRANSFERS = os.environ.get(
+    "DISABLE_API_TRANSFERS", "1").strip().lower() in ("1", "true", "yes", "on")
+TRANSFER_BLOCK_MSG = ("انتقال وجه بین کیف اسپات و فیوچرز از طریق API غیرفعال است؛ "
+                      "هنگام ثبت سفارش، مارجین موردنیاز به‌صورت خودکار تأمین می‌شود")
 AUTO_ARM_SL_PCT = float(os.environ.get("AUTO_ARM_SL_PCT", "0.5"))
 
 

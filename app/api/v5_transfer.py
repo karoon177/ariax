@@ -85,6 +85,10 @@ async def inter_transfer(request: Request):
     bookkeeping (combined wallet, no bucket move needed).
     """
     rec = await deps.verify_v5_signature(request, require="trade")
+    if config.DISABLE_API_TRANSFERS:
+        raise ApiError(10001,
+                       "wallet transfers are disabled by the exchange "
+                       "administrator; trading margin is auto-funded")
     b = await _json(request)
     transfer_id = (b.get("transferId") or "").strip()
     coin = (b.get("coin") or "USDT").upper()

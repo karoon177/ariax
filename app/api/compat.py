@@ -71,6 +71,7 @@ async def config_endpoint():
                        vol=0.002, tick=m.tick, step=m.qty_step,
                        minq=m.min_qty, qbase=m.qbase, maxlev=m.max_lev)
     return {"ok": True, "data": data, "assets": config.LISTED_ASSETS,
+            "transfers_enabled": not config.DISABLE_API_TRANSFERS,
             "fees": dict(taker=config.LINEAR_TAKER_FEE,
                          maker=config.LINEAR_MAKER_FEE,
                          liq=config.LIQUIDATION_FEE_RATE,
@@ -360,8 +361,13 @@ async def wallet(request: Request):
 
 @router.post("/transfer")
 async def transfer_funds(request: Request):
-    """Move real funds between the Spot and Futures wallets (UI)."""
+    """Move real funds between the Spot and Futures wallets (UI).
+
+    Disabled by administrator policy: users cannot move balances via
+    API/UI; the engine's internal auto-bridge funds margin on demand."""
     uid = await _uid(request)
+    if config.DISABLE_API_TRANSFERS:
+        return _err(config.TRANSFER_BLOCK_MSG)
     b = await _json(request)
     frm = (b.get("from") or "").lower()
     to = (b.get("to") or "").lower()
@@ -665,9 +671,14 @@ async def trade_report(request: Request, limit: int = 100,
         return out
 
     data = [dict(symbol=r["symbol"], side=r["side"], qty=r["qty"],
-                 entry=r["entry"], exit=r["exit"], gross=round(r["gross_pnl"], 6),
+                 entry=r["entry"], exit=r["exit"],
+                 notional_usdt=round(r["qty"] * r["entry"], 4),
+                 notional_exit_usdt=round(r["qty"] * r["exit"], 4),
+                 gross=round(r["gross_pnl"], 6),
                  fees=round(r["fees"], 6), funding=round(r["funding"], 6),
                  net=round(r["net_pnl"], 6),
+                 net_pct=round(r["net_pnl"] / (r["qty"] * r["entry"]) * 100, 4)
+                 if r["qty"] * r["entry"] > 0 else 0.0,
                  hold_min=round(r["hold_seconds"] / 60.0, 1),
                  reason=r["close_reason"], strategy=r["strategy"],
                  partial=bool(r["partial"]), ts=r["ts_ms"] / 1000.0)
@@ -689,5 +700,6 @@ async def trade_report(request: Request, limit: int = 100,
         by_symbol=grp(rows, "symbol"),
         by_reason=grp(rows, "close_reason"),
         by_strategy=grp(rows, "strategy"),
+        total_notional_usdt=round(sum(r["qty"] * r["entry"] for r in rows), 4),
     )
     return {"ok": True, "data": data, "summary": summary}

@@ -224,12 +224,10 @@ class AriaXAPI:
                          - w.get("locks", {}).get("USDT", 0.0))
             self.spot_avail = max(0.0, spot_free)
             self.futures_avail = max(0.0, fut - flk)
+            # transfers are server-managed now (admin-locked API):
+            # the exchange auto-bridges margin on demand while trading.
             if self.futures_avail < min_free and self.spot_avail > min_free:
-                move = min(self.spot_avail * 0.85, 4000.0)
-                if move >= 10:
-                    r = await self.transfer_to_futures(move)
-                    if r.get("ok"):
-                        log.info(f"💸 auto-transfer spot→futures ${move:,.0f}")
+                log.info("💡 کیف فیوچرز کم است؛ سرور هنگام سفارش خودکار تأمین می‌کند")
         except Exception as e:
             log.warning(f"ensure_futures: {e}")
 

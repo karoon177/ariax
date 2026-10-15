@@ -372,8 +372,24 @@ def test_legacy_api_shapes(client):
 # v2.0.2: Bybit inter-transfer compatibility (futures wallet funding)          #
 # --------------------------------------------------------------------------- #
 def test_inter_transfer_compatibility(client):
+    from app import config
     token, _ = _register(client, "transfer@example.com")
     key, secret = _make_key(client, token)
+    # ── ADMIN LOCK: all API transfers must be refused by default ──
+    blocked = _signed(client, "POST", "/v5/asset/transfer/inter-transfer",
+                      key, secret,
+                      body={"transferId": "blk-1", "coin": "USDT",
+                            "amount": "100", "fromAccountType": "SPOT",
+                            "toAccountType": "CONTRACT"})
+    assert blocked.json()["retCode"] != 0
+    ui_blk = client.post("/api/transfer",
+                         headers={"Authorization": f"Bearer {token}"},
+                         json={"from": "spot", "to": "futures", "amount": 50})
+    assert not ui_blk.json()["ok"] and "غیرفعال" in ui_blk.json()["error"]
+    cfg = client.get("/api/config").json()
+    assert cfg["transfers_enabled"] is False
+    # ── mechanics still intact when an admin re-enables them ──
+    config.DISABLE_API_TRANSFERS = False
     # 1) classic bot flow: fund the CONTRACT (futures) wallet from SPOT
     r = _signed(client, "POST", "/v5/asset/transfer/inter-transfer", key, secret,
                 body={"transferId": "tr-test-1", "coin": "USDT",
@@ -429,42 +445,29 @@ def test_inter_transfer_compatibility(client):
     wl = w.json()["result"]["list"][0]
     assert wl["accountType"] == "CONTRACT"
     assert float(wl["coin"][0]["walletBalance"]) == 3_000
+    config.DISABLE_API_TRANSFERS = True   # restore the admin lock
 
 
 def test_dual_wallet_auto_bridge_and_ui_transfer(client):
     """UI transfer endpoint + transparent spot→futures auto-bridge."""
     token, _ = _register(client, "dual@example.com")
     h = {"Authorization": f"Bearer {token}"}
-    # 1) manual UI transfer: spot -> futures
+    # 1) UI transfer is ADMIN-LOCKED: must be refused with Persian error
     t0 = client.post("/api/transfer", headers=h,
                      json={"from": "spot", "to": "futures", "amount": 5000})
-    assert t0.json()["ok"] and t0.json()["futures"] == 5000
-    # 2) linear order uses the futures wallet (no bridge needed)
+    assert not t0.json()["ok"] and "غیرفعال" in t0.json()["error"]
+    # 2) linear order still works: the SERVER auto-bridges margin on demand
     r = client.post("/api/order", headers=h, json={
         "symbol": "BTCUSD", "side": "buy", "type": "limit",
-        "price": 95_000, "qty": 0.01, "lev": 10})
+        "price": 95_000, "qty": 0.2, "lev": 10})   # > futures free → bridge
     assert r.json()["ok"], r.text
     w = client.get("/api/wallet", headers=h).json()
-    assert w["futures"]["balances"]["USDT"] == 5000          # free untouched
-    assert w["futures"]["locks"]["USDT"] > 0                  # margin held
-    # 3) transfer back what is available
-    avail = w["futures"]["balances"]["USDT"] - w["futures"]["locks"]["USDT"]
+    assert w["futures"]["locks"]["USDT"] > 0        # margin escrowed
+    assert w["balances"]["USDT"] < 20_000           # bridged from spot
+    # 3) reverse transfer also locked
     t = client.post("/api/transfer", headers=h,
-                    json={"from": "futures", "to": "spot", "amount": avail})
-    assert t.json()["ok"] and t.json()["moved"] == pytest.approx(avail)
-    # 4) auto-bridge: an order larger than the futures wallet pulls from spot
-    w2 = client.get("/api/wallet", headers=h).json()
-    spot_before = w2["balances"]["USDT"]
-    r2 = client.post("/api/order", headers=h, json={
-        "symbol": "BTCUSD", "side": "buy", "type": "limit",
-        "price": 95_000, "qty": 0.2, "lev": 10})   # needs ~1995 margin
-    assert r2.json()["ok"], r2.text
-    w3 = client.get("/api/wallet", headers=h).json()
-    assert w3["balances"]["USDT"] < spot_before     # bridge moved real funds
-    # 5) overdraft UI transfer rejected with a Persian error
-    bad = client.post("/api/transfer", headers=h,
-                      json={"from": "futures", "to": "spot", "amount": 10**9})
-    assert not bad.json()["ok"]
+                    json={"from": "futures", "to": "spot", "amount": 100})
+    assert not t.json()["ok"] and "غیرفعال" in t.json()["error"]
 
 
 # --------------------------------------------------------------------------- #
@@ -603,3 +606,25 @@ def test_eternal_key_undestroyable(client):
         assert w2["ok"]
     finally:
         config.DISABLE_REGISTRATION = old
+
+
+def test_trade_report_notional_usdt(client):
+    """Report rows must carry USDT notional + net PnL transparently."""
+    token, _ = _register(client, "notional@example.com")
+    h = {"Authorization": f"Bearer {token}"}
+    client.post("/api/order", headers=h, json={
+        "symbol": "ETHUSD", "side": "buy", "type": "market",
+        "qty": 0.02, "lev": 5})
+    pos = client.get("/api/positions", headers=h).json()["data"][0]
+    client.post("/api/tpsl", headers=h, json={
+        "symbol": "ETHUSD", "sl": round(pos["mark"] * 1.001, 6)})
+    import time as _t
+    _t.sleep(1.6)
+    rep = client.get("/api/trade-report", headers=h).json()
+    row = next(r for r in rep["data"] if r["symbol"] == "ETHUSD")
+    assert row["notional_usdt"] == pytest.approx(
+        row["qty"] * row["entry"], abs=0.01)
+    assert row["notional_exit_usdt"] == pytest.approx(
+        row["qty"] * row["exit"], abs=0.01)
+    assert "net_pct" in row and "fees" in row and "net" in row
+    assert rep["summary"]["total_notional_usdt"] > 0
