@@ -1022,6 +1022,20 @@ class QuantEngine:
 
     async def start(self):
         await self.db.init()
+
+        async def _auth_probe_wrap():
+            await asyncio.sleep(4)
+            try:
+                w = await self.ariax.get_wallet()
+                if isinstance(w, dict) and w.get("ok") is False and \
+                        "authentication" in str(w.get("error", "")).lower():
+                    log.error("🚫 کلید API نامعتبر! مقادیر ابدی را در Environment بگذارید:")
+                    log.error("   ARIAX_BASE=https://dryclean-app-1.onrender.com")
+                    log.error("   ARIAX_KEY=arx-karoon177-fixed-9d4e7c1a")
+                    log.error("   ARIAX_SECRET=Kf9mWx2vQz7RtN4pZb8LhY3jT6sEgUa5cHn1oPzIkM0yBvVXe")
+                    log.error("   (یا python3 diagnose.py را اجرا کنید)")
+            except Exception:
+                pass
         log.info(f"v19.3 AriaX Testnet starting | base={ARIAX_BASE}")
         if not ARIAX_KEY or not ARIAX_SECRET:
             log.error("ARIAX_KEY / ARIAX_SECRET missing!")
@@ -1092,6 +1106,7 @@ class QuantEngine:
             await self.ariax.ensure_futures_margin(min_free=60.0)
 
         asyncio.create_task(_warmup())
+        asyncio.create_task(_auth_probe_wrap())
         await asyncio.sleep(2)
         try:
             await asyncio.wait_for(self.smart_sync(startup=True), timeout=40)
